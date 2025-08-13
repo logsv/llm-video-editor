@@ -1,0 +1,236 @@
+"""
+Ollama-based planning module for local LLM inference.
+"""
+import json
+import requests
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
+
+from .planner import VideoPlanner, EditDecisionList, EDLClip, EditOperation
+
+
+class OllamaLLM:
+    """Simple Ollama API wrapper for local LLM inference."""
+    
+    def __init__(self, model_name: str = "llama3.2", base_url: str = "http://localhost:11434"):
+        """
+        Initialize Ollama LLM.
+        
+        Args:
+            model_name: Ollama model name (e.g., llama3.2, codellama, mistral)
+            base_url: Ollama server URL
+        """
+        self.model_name = model_name
+        self.base_url = base_url
+    
+    def invoke(self, messages: List[Dict[str, str]]) -> Dict[str, str]:
+        """
+        Invoke the Ollama model with messages.
+        
+        Args:
+            messages: List of message dictionaries with 'role' and 'content'
+            
+        Returns:
+            Response dictionary with 'content' key
+        """
+        # Combine messages into a single prompt for Ollama
+        prompt_parts = []
+        for message in messages:
+            role = message.get('role', 'user')
+            content = message.get('content', '')
+            if hasattr(message, 'content'):
+                content = message.content
+            
+            if role == 'system':
+                prompt_parts.append(f"System: {content}")
+            elif role == 'user':
+                prompt_parts.append(f"User: {content}")
+            else:
+                prompt_parts.append(content)
+        
+        prompt = "\\n\\n".join(prompt_parts)
+        
+        # Make request to Ollama
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model_name,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.7,
+                        "top_p": 0.9
+                    }
+                },
+                timeout=120  # 2 minutes timeout
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            return type('Response', (), {'content': result.get('response', '')})()
+            
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Failed to connect to Ollama: {e}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid response from Ollama: {e}")
+
+
+class OllamaVideoPlanner(VideoPlanner):
+    """Video planner using local Ollama LLM."""
+    
+    def __init__(self, model_name: str = "llama3.2", base_url: str = "http://localhost:11434"):
+        """
+        Initialize Ollama video planner.
+        
+        Args:
+            model_name: Ollama model name
+            base_url: Ollama server URL
+        """
+        ollama_llm = OllamaLLM(model_name=model_name, base_url=base_url)
+        super().__init__(llm=ollama_llm)
+        self.model_name = model_name
+    
+    def check_ollama_connection(self) -> bool:
+        """Check if Ollama is running and model is available."""
+        try:
+            response = requests.get(f"{self.llm.base_url}/api/tags", timeout=5)
+            if response.status_code == 200:
+                models = response.json().get('models', [])
+                model_names = [m['name'] for m in models]
+                return any(self.model_name in name for name in model_names)
+            return False
+        except:
+            return False
+    
+    def _get_system_message(self) -> str:
+        """Get system message optimized for local LLMs."""
+        return """You are a professional video editor AI. Create detailed Edit Decision Lists (EDL) from user prompts.
+
+TASK: Analyze video content and generate JSON EDL for the target platform.
+
+KEY RESPONSIBILITIES:
+1. Select engaging, relevant content segments
+2. Ensure smooth transitions at scene boundaries  
+3. Optimize for platform specs (YouTube 16:9, Reels 9:16, etc.)
+4. Include reframing, subtitles, and audio adjustments
+
+RESPONSE FORMAT: Valid JSON only, following the exact schema provided.
+
+Be precise, concise, and focus on the most impactful content segments."""
+
+    def generate_edl(
+        self,
+        prompt: str,
+        transcript_segments: List[Dict[str, Any]],
+        scenes: List[Dict[str, Any]], 
+        media_info: Dict[str, Any],
+        target_platform: str = "youtube"
+    ) -> EditDecisionList:
+        """
+        Generate EDL using Ollama with optimized prompting for local models.
+        """
+        # Prepare simplified context for better local model performance
+        context = self._prepare_simplified_context(
+            transcript_segments, scenes, media_info, target_platform
+        )
+        
+        # Create optimized planning prompt for local models
+        planning_prompt = self._create_local_planning_prompt(prompt, context, target_platform)
+        
+        # Create messages
+        messages = [
+            {"role": "system", "content": self._get_system_message()},
+            {"role": "user", "content": planning_prompt}
+        ]
+        
+        # Get response from Ollama
+        response = self.llm.invoke(messages)
+        
+        # Parse and validate EDL
+        edl_data = self._parse_edl_response(response.content)
+        edl = self._create_edl_object(edl_data, target_platform, media_info)
+        
+        return edl
+    
+    def _prepare_simplified_context(
+        self,
+        transcript_segments: List[Dict[str, Any]],
+        scenes: List[Dict[str, Any]],
+        media_info: Dict[str, Any],
+        target_platform: str
+    ) -> Dict[str, Any]:
+        """Prepare simplified context for better local model performance."""
+        # Limit data to most relevant parts
+        limited_transcript = transcript_segments[:5]  # First 5 segments
+        limited_scenes = scenes[:8]  # First 8 scenes
+        
+        return {
+            "media_info": {
+                "duration": media_info.get("duration", 0),
+                "aspect_ratio": media_info.get("aspect_ratio", "16:9")
+            },
+            "transcript_sample": limited_transcript,
+            "scenes_sample": limited_scenes,
+            "platform_specs": self._get_platform_specs(target_platform)
+        }
+    
+    def _create_local_planning_prompt(self, user_prompt: str, context: Dict[str, Any], target_platform: str) -> str:
+        """Create optimized prompt for local models."""
+        platform_specs = context["platform_specs"]
+        
+        prompt = f"""Create an Edit Decision List for: "{user_prompt}"
+
+TARGET: {target_platform.upper()}
+- Max duration: {platform_specs['max_duration']}s  
+- Aspect ratio: {platform_specs['aspect_ratio']}
+- Resolution: {platform_specs['resolution']}
+
+SOURCE MEDIA:
+- Duration: {context['media_info']['duration']:.1f}s
+- Current ratio: {context['media_info']['aspect_ratio']}
+
+TRANSCRIPT SAMPLE (first segments):
+{json.dumps(context['transcript_sample'], indent=1)}
+
+SCENE SAMPLE (first scenes):
+{json.dumps(context['scenes_sample'], indent=1)}
+
+GENERATE JSON EDL:
+{{
+  "target_duration": <seconds>,
+  "clips": [
+    {{
+      "clip_id": "clip_001",
+      "source": "<source_file>", 
+      "start_time": <start_seconds>,
+      "end_time": <end_seconds>,
+      "operations": [
+        {{"type": "reframe", "params": {{"target_aspect": "{platform_specs['aspect_ratio']}", "focus": "speaker"}}}},
+        {{"type": "subtitle", "params": {{"text": "...", "start": <start>, "end": <end>, "style": "{platform_specs['subtitle_style']}"}}}},
+        {{"type": "audio_adjust", "params": {{"normalize": true, "target_lufs": -16}}}}
+      ]
+    }}
+  ],
+  "global_operations": [
+    {{"type": "platform_export", "params": {{"format": "{target_platform}"}}}}
+  ]
+}}
+
+Generate JSON now:"""
+        
+        return prompt
+
+
+def create_ollama_planner(model_name: str = "llama3.2", base_url: str = "http://localhost:11434") -> OllamaVideoPlanner:
+    """
+    Create an Ollama-based video planner.
+    
+    Args:
+        model_name: Ollama model name
+        base_url: Ollama server URL
+        
+    Returns:
+        OllamaVideoPlanner instance
+    """
+    return OllamaVideoPlanner(model_name=model_name, base_url=base_url)

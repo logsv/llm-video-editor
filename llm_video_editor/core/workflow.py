@@ -13,6 +13,7 @@ from .media_probe import MediaProbe, MediaInfo
 from .asr import ASRProcessor, TranscriptSegment
 from .scene_detection import SceneDetector, Scene
 from .planner import VideoPlanner, EditDecisionList
+from .ollama_planner import OllamaVideoPlanner, create_ollama_planner
 
 
 class VideoEditingState(TypedDict):
@@ -43,7 +44,9 @@ class VideoEditingWorkflow:
         self,
         asr_model: str = "large-v3",
         scene_threshold: float = 27.0,
-        planner_model: str = "gpt-4"
+        planner_model: str = "gpt-4",
+        use_ollama: bool = False,
+        ollama_base_url: str = "http://localhost:11434"
     ):
         """
         Initialize workflow.
@@ -51,11 +54,19 @@ class VideoEditingWorkflow:
         Args:
             asr_model: Whisper model size for ASR
             scene_threshold: Threshold for scene detection
-            planner_model: LLM model for planning
+            planner_model: LLM model for planning (OpenAI) or Ollama model name
+            use_ollama: Whether to use local Ollama instead of OpenAI
+            ollama_base_url: Ollama server URL
         """
         self.asr_processor = ASRProcessor(model_size=asr_model)
         self.scene_detector = SceneDetector(threshold=scene_threshold)
-        self.planner = VideoPlanner(model_name=planner_model)
+        
+        if use_ollama:
+            self.planner = OllamaVideoPlanner(model_name=planner_model, base_url=ollama_base_url)
+            print(f"Using Ollama model: {planner_model}")
+        else:
+            self.planner = VideoPlanner(model_name=planner_model)
+            print(f"Using OpenAI model: {planner_model}")
         
         # Create workflow graph
         self.workflow = self._create_workflow()
@@ -383,7 +394,9 @@ class VideoEditingWorkflow:
 def create_workflow(
     asr_model: str = "large-v3",
     scene_threshold: float = 27.0,
-    planner_model: str = "gpt-4"
+    planner_model: str = "gpt-4",
+    use_ollama: bool = False,
+    ollama_base_url: str = "http://localhost:11434"
 ) -> VideoEditingWorkflow:
     """
     Factory function to create a video editing workflow.
@@ -392,6 +405,8 @@ def create_workflow(
         asr_model: Whisper model size
         scene_threshold: Scene detection threshold
         planner_model: LLM model for planning
+        use_ollama: Whether to use local Ollama instead of OpenAI
+        ollama_base_url: Ollama server URL
         
     Returns:
         VideoEditingWorkflow instance
@@ -399,5 +414,7 @@ def create_workflow(
     return VideoEditingWorkflow(
         asr_model=asr_model,
         scene_threshold=scene_threshold,
-        planner_model=planner_model
+        planner_model=planner_model,
+        use_ollama=use_ollama,
+        ollama_base_url=ollama_base_url
     )

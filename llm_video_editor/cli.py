@@ -64,6 +64,23 @@ from .utils.file_utils import find_video_files, validate_input_path
     help='LLM model for planning (gpt-4, gpt-3.5-turbo, etc.)'
 )
 @click.option(
+    '--use-ollama',
+    is_flag=True,
+    help='Use local Ollama instead of OpenAI'
+)
+@click.option(
+    '--ollama-model',
+    default='llama3.2',
+    type=str,
+    help='Ollama model name (llama3.2, codellama, mistral, etc.)'
+)
+@click.option(
+    '--ollama-url',
+    default='http://localhost:11434',
+    type=str,
+    help='Ollama server URL'
+)
+@click.option(
     '--dry-run',
     is_flag=True,
     help='Show what would be done without actually processing'
@@ -87,6 +104,9 @@ def main(
     scene_threshold: float,
     language: Optional[str],
     planner_model: str,
+    use_ollama: bool,
+    ollama_model: str,
+    ollama_url: str,
     dry_run: bool,
     verbose: bool,
     config: Optional[str]
@@ -146,11 +166,19 @@ def main(
             return
         
         # Initialize workflow
-        click.echo(f"\\n🤖 Initializing workflow...")
+        if use_ollama:
+            click.echo(f"\\n🤖 Initializing workflow with Ollama model: {ollama_model}...")
+            actual_planner_model = ollama_model
+        else:
+            click.echo(f"\\n🤖 Initializing workflow with OpenAI model: {planner_model}...")
+            actual_planner_model = planner_model
+            
         workflow = create_workflow(
             asr_model=asr_model,
             scene_threshold=scene_threshold,
-            planner_model=planner_model
+            planner_model=actual_planner_model,
+            use_ollama=use_ollama,
+            ollama_base_url=ollama_url
         )
         
         # Process each video file
