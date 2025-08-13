@@ -1,0 +1,32 @@
+{
+  "asr_model": "large-v3",
+  "scene_threshold": 27.0,
+  "planner_model": "gpt-4",
+  "language": "en",
+  "gpu_acceleration": true,
+  "quality_preset": "high",
+  "platforms": {
+    "youtube": {
+      "max_duration": 600,
+      "quality": "high"
+    },
+    "reels": {
+      "max_duration": 60,
+      "quality": "medium"
+    },
+    "tiktok": {
+      "max_duration": 60,
+      "quality": "medium"
+    }
+  },
+  "processing": {
+    "parallel_jobs": 2,
+    "temp_dir": "./temp",
+    "cleanup_temp": true
+  },
+  "output": {
+    "create_subdirs": true,
+    "export_formats": ["mp4", "edl", "srt"],
+    "validation_report": true
+  }
+}

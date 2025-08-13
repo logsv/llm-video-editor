@@ -1,0 +1,30 @@
+name: llm-video-editor
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - ffmpeg
+  - cudatoolkit=11.8  # for GPU acceleration
+  - pip:
+    - langgraph>=0.0.40
+    - langchain>=0.1.0
+    - langchain-openai>=0.1.0
+    - faster-whisper>=0.10.0
+    - scenedetect>=0.6.2
+    - moviepy>=1.0.3
+    - opentimelineio>=0.15.0
+    - torch>=2.0.0
+    - torchaudio>=2.0.0
+    - transformers>=4.30.0
+    - click>=8.0.0
+    - tqdm>=4.64.0
+    - numpy>=1.24.0
+    - opencv-python>=4.8.0
+    - Pillow>=10.0.0
+    - pytest>=7.4.0
+    - pytest-asyncio>=0.21.0
+    - python-dotenv>=1.0.0
+    - pydantic>=2.0.0

@@ -1,0 +1,33 @@
+# Core dependencies
+langgraph>=0.0.40
+langchain>=0.1.0
+langchain-openai>=0.1.0
+
+# Audio/Video processing
+faster-whisper>=0.10.0
+scenedetect>=0.6.2
+moviepy>=1.0.3
+opentimelineio>=0.15.0
+
+# ML/AI
+torch>=2.0.0
+torchaudio>=2.0.0
+transformers>=4.30.0
+
+# CLI and utilities
+click>=8.0.0
+tqdm>=4.64.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# Data processing
+numpy>=1.24.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Development and testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
