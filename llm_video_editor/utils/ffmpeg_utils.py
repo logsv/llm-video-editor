@@ -26,13 +26,16 @@ class FFmpegProcessor:
     
     @staticmethod
     def check_gpu_acceleration() -> bool:
-        """Check if NVENC GPU acceleration is available."""
+        """Check if GPU acceleration is available (NVENC or VideoToolbox)."""
         try:
             result = subprocess.run(
                 ['ffmpeg', '-encoders'],
                 capture_output=True, text=True, check=True
             )
-            return 'h264_nvenc' in result.stdout
+            # Check for NVENC (NVIDIA) or VideoToolbox (Apple) hardware encoding
+            return ('h264_nvenc' in result.stdout or 
+                    'h264_videotoolbox' in result.stdout or 
+                    'hevc_videotoolbox' in result.stdout)
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
     

@@ -264,7 +264,7 @@ Generate the EDL now:"""
             
             clips.append(EDLClip(
                 clip_id=clip_data.get("clip_id", f"clip_{i:03d}"),
-                source=clip_data.get("source", media_info.get("filepath", "unknown")),
+                source=clip_data.get("source", getattr(media_info, "filepath", "unknown")),
                 start_time=clip_data["start_time"],
                 end_time=clip_data["end_time"],
                 duration=clip_data["end_time"] - clip_data["start_time"],

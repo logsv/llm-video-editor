@@ -1,72 +1,138 @@
 # LLM Video Editor
 
-An intelligent, prompt-driven video router/editor that processes video content and outputs platform-ready cuts for YouTube (16:9) and Instagram Reels (9:16).
+An intelligent, prompt-driven video router/editor that processes video content and outputs platform-ready cuts for YouTube (16:9) and Instagram Reels (9:16). **Now fully functional with local LLM support using Ollama!** 🎉
 
 ## 🎬 Features
 
-- **Intelligent Analysis**: Automatic speech recognition (ASR) with word-level timestamps
-- **Scene Detection**: Smart boundary detection for optimal cuts
-- **LLM Planning**: AI-driven Edit Decision List (EDL) generation from natural language prompts
-- **Platform Optimization**: Pre-configured settings for YouTube, Instagram Reels, TikTok
-- **Professional Output**: Exports EDL, SRT captions, and validation reports
-- **GPU Acceleration**: NVENC hardware encoding support for faster rendering
+- **Intelligent Analysis**: Automatic speech recognition (ASR) with word-level timestamps using Whisper
+- **Scene Detection**: Smart boundary detection for optimal cuts using PySceneDetect
+- **Local LLM Planning**: AI-driven Edit Decision List (EDL) generation using Ollama (no API keys required!)
+- **Platform Optimization**: Pre-configured settings for YouTube (16:9), Instagram Reels (9:16), TikTok
+- **Professional Video Rendering**: GPU-accelerated video processing with FFmpeg
+- **Complete Offline Processing**: All processing runs locally - no external dependencies
+- **Smart Reframing**: Automatic aspect ratio conversion (16:9 to 9:16) with intelligent cropping
 
 ## 🚀 Quick Start
 
 ### Installation
 
-1. **Create Conda Environment**
+1. **Install Ollama** (for local LLM support)
    ```bash
-   conda env create -f environment.yml
-   conda activate llm-video-editor
+   # macOS
+   brew install ollama
+   
+   # Start Ollama service
+   ollama serve
+   
+   # Pull a model (in another terminal)
+   ollama pull llama3.1
    ```
 
-2. **Install Package**
+2. **Create Python Environment**
+   ```bash
+   # Using conda (recommended)
+   conda env create -f environment.yml
+   conda activate llm-video-editor
+   
+   # Or using venv
+   python -m venv venv
+   source venv/bin/activate  # Linux/macOS
+   # or venv\Scripts\activate  # Windows
+   ```
+
+3. **Install FFmpeg**
+   ```bash
+   # macOS
+   brew install ffmpeg
+   
+   # Ubuntu
+   sudo apt update && sudo apt install ffmpeg
+   
+   # Windows: Download from https://ffmpeg.org/
+   ```
+
+4. **Install Package**
    ```bash
    pip install -e .
    ```
 
 ### Basic Usage
 
+**Using the Python API (Recommended):**
+```python
+from llm_video_editor.core.ollama_planner import OllamaVideoPlanner
+from llm_video_editor.core.media_probe import MediaProbe
+from llm_video_editor.core.asr import ASRProcessor
+from llm_video_editor.core.scene_detection import SceneDetector
+from llm_video_editor.core.renderer import VideoRenderer
+
+# Initialize components
+planner = OllamaVideoPlanner(model_name="llama3.1")
+renderer = VideoRenderer(use_gpu=True)
+probe = MediaProbe()
+
+# Process video
+media_info = probe.probe_file("input.mp4")
+edl = planner.generate_edl(
+    prompt="Create a 30s Instagram Reel highlighting the best moments",
+    media_info=media_info,
+    target_platform="reels"
+)
+
+# Render final video
+results = renderer.render_edl(edl, "input.mp4", "output/")
+print(f"Final video: {results['final_video']}")
+```
+
+**Command Line (Coming Soon):**
 ```bash
 # Create a 60s Instagram Reel
 llm-video-router -i video.mp4 -p "60s reel: top 3 takeaways, captions" -t reels
 
-# Process multiple videos for YouTube
+# Process multiple videos for YouTube  
 llm-video-router -i ./videos -p "10min compilation: best moments" -t youtube
-
-# Custom configuration
-llm-video-router -i video.mp4 -p "Resumen en 30s" -t reels --language es --config config.json
 ```
 
 ## 📋 Requirements
 
 ### System Dependencies
-- **FFmpeg** (with NVENC support for GPU acceleration)
+- **Ollama** (for local LLM inference)
+- **FFmpeg** (with VideoToolbox/NVENC support for GPU acceleration)
 - **Python 3.11+**
-- **CUDA** (optional, for GPU acceleration)
 
-### Python Dependencies
-- LangGraph for workflow orchestration
-- faster-whisper for speech recognition
-- PySceneDetect for scene boundary detection
-- OpenTimelineIO for professional interchange
-- OpenAI/Transformers for LLM planning
+### Python Dependencies (Automatically Installed)
+- **LangGraph** for workflow orchestration
+- **faster-whisper** for speech recognition with local Whisper models
+- **PySceneDetect** for intelligent scene boundary detection  
+- **OpenTimelineIO** for professional video interchange
+- **langchain-community** for Ollama LLM integration
+- **requests** for API communication
+
+### Tested Configurations
+- ✅ **macOS**: Apple Silicon with VideoToolbox GPU acceleration
+- ✅ **Linux**: NVIDIA GPUs with NVENC acceleration
+- ⚠️ **Windows**: CPU-only (GPU acceleration coming soon)
 
 ## 🏗️ Architecture
 
 ```
-Input Video → Probe → ASR + Scene Detection → LLM Planning → Validation → Output
+Input Video → Media Probe → ASR + Scene Detection → Ollama LLM Planning → Video Rendering → Platform-Ready Output
 ```
 
 ### Workflow Steps
 
-1. **Probe**: Extract media metadata and basic analysis
-2. **ASR**: Transcribe with word-level timestamps using Whisper
-3. **Scene Detection**: Identify shot boundaries using content analysis
-4. **Planning**: Generate Edit Decision List using LLM based on user prompt
-5. **Validation**: Quality checks and constraint validation
-6. **Export**: EDL, captions, thumbnails, and validation reports
+1. **Media Probe**: Extract video metadata, resolution, duration, and codec information
+2. **ASR Processing**: Transcribe audio with word-level timestamps using local Whisper models
+3. **Scene Detection**: Identify shot boundaries and content changes using PySceneDetect
+4. **LLM Planning**: Generate Edit Decision List (EDL) using local Ollama models based on user prompt
+5. **Video Rendering**: Apply cuts, reframing, and effects with GPU-accelerated FFmpeg
+6. **Output Generation**: Create platform-optimized videos with subtitles and metadata
+
+### Key Improvements ✨
+- **100% Local Processing**: No API keys or internet required after initial setup
+- **GPU Acceleration**: Hardware-accelerated video encoding (VideoToolbox/NVENC)
+- **Smart Reframing**: Intelligent 16:9 to 9:16 conversion with content-aware cropping
+- **Production Ready**: Generates actual video files, not just planning documents
 
 ## 🎯 Platform Presets
 
@@ -184,6 +250,28 @@ The system performs automatic validation:
 - ✅ Speech coverage analysis
 - ✅ Audio loudness standards (EBU-R128)
 
+## 🧪 Testing
+
+### Quick Test
+```python
+# Test the complete workflow
+python test_ollama_workflow.py
+```
+
+Expected output:
+- ✅ Media probing: Video metadata extraction
+- ✅ Scene detection: Boundary identification
+- ✅ ASR processing: Audio transcription
+- ✅ Ollama LLM: EDL generation
+- ✅ Video rendering: Platform-ready output
+
+### Component Tests
+```python
+# Test individual components
+python test_full_rendering.py    # Video rendering pipeline
+python test_concat_fix.py       # Video concatenation
+```
+
 ## 🛠️ Development
 
 ### Setup Development Environment
@@ -193,11 +281,16 @@ cd llm-video-editor
 conda env create -f environment.yml
 conda activate llm-video-editor
 pip install -e .
+
+# Install Ollama and pull model
+ollama serve &
+ollama pull llama3.1
 ```
 
 ### Run Tests
 ```bash
-python -m pytest tests/
+python -m pytest tests/         # Unit tests
+python test_ollama_workflow.py  # End-to-end test
 ```
 
 ### Code Quality

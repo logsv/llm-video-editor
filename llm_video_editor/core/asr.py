@@ -23,15 +23,16 @@ class TranscriptSegment:
 class ASRProcessor:
     """Automatic Speech Recognition processor using faster-whisper."""
     
-    def __init__(self, model_size: str = "large-v3", compute_type: str = "int8_float16"):
+    def __init__(self, model_size: str = "large-v3", compute_type: str = "float32"):
         """
         Initialize ASR processor.
         
         Args:
             model_size: Whisper model size (tiny, base, small, medium, large-v3)
-            compute_type: Compute precision (int8_float16, int8, float16, float32)
+            compute_type: Compute precision (float32, float16, int8, int8_float16)
         """
         self.model_size = model_size
+        # Use compatible compute type - try int8_float16, fallback to float32
         self.compute_type = compute_type
         self._model = None
     
@@ -40,7 +41,14 @@ class ASRProcessor:
         """Lazy load the Whisper model."""
         if self._model is None:
             print(f"Loading Whisper model: {self.model_size}")
-            self._model = WhisperModel(self.model_size, compute_type=self.compute_type)
+            try:
+                self._model = WhisperModel(self.model_size, compute_type=self.compute_type)
+            except ValueError as e:
+                if "compute type" in str(e).lower():
+                    print(f"Compute type {self.compute_type} not supported, falling back to float32")
+                    self._model = WhisperModel(self.model_size, compute_type="float32")
+                else:
+                    raise e
         return self._model
     
     def transcribe_file(
@@ -121,7 +129,7 @@ class ASRProcessor:
         
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w', encoding='utf-8') as f:
-            f.write("\\n".join(srt_content))
+            f.write("\n".join(srt_content))
         
         return output_path
     
@@ -148,7 +156,7 @@ class ASRProcessor:
         
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w', encoding='utf-8') as f:
-            f.write("\\n".join(vtt_content))
+            f.write("\n".join(vtt_content))
         
         return output_path
     

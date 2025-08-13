@@ -124,7 +124,7 @@ Be precise, concise, and focus on the most impactful content segments."""
         prompt: str,
         transcript_segments: List[Dict[str, Any]],
         scenes: List[Dict[str, Any]], 
-        media_info: Dict[str, Any],
+        media_info,  # Can be Dict or MediaInfo object
         target_platform: str = "youtube"
     ) -> EditDecisionList:
         """
@@ -165,13 +165,25 @@ Be precise, concise, and focus on the most impactful content segments."""
         limited_transcript = transcript_segments[:5]  # First 5 segments
         limited_scenes = scenes[:8]  # First 8 scenes
         
+        # Convert Scene objects to dicts if needed
+        scenes_dict = []
+        for scene in limited_scenes:
+            if hasattr(scene, 'start_time'):  # Scene object
+                scenes_dict.append({
+                    "start_time": scene.start_time,
+                    "end_time": scene.end_time,
+                    "duration": scene.duration
+                })
+            else:  # Already a dict
+                scenes_dict.append(scene)
+        
         return {
             "media_info": {
-                "duration": media_info.get("duration", 0),
-                "aspect_ratio": media_info.get("aspect_ratio", "16:9")
+                "duration": media_info.duration,
+                "aspect_ratio": f"{media_info.width}:{media_info.height}"
             },
             "transcript_sample": limited_transcript,
-            "scenes_sample": limited_scenes,
+            "scenes_sample": scenes_dict,
             "platform_specs": self._get_platform_specs(target_platform)
         }
     
