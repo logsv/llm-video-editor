@@ -132,3 +132,42 @@ logs/
 *.tar.gz
 *.rar
 *.7z
+
+# Project-specific output directories
+output_*/
+rendered_*/
+test_output/
+temp_*/
+
+# Development and test files
+test_*.py
+debug_*.py
+scratch_*.py
+experiment_*.py
+
+# Scene detection output
+scenes_*.json
+
+# Transcription output
+transcription_*.srt
+
+# Platform-specific output
+reels_*.mp4
+tiktok_*.mp4
+youtube_*.mp4
+
+# Ollama and LLM cache
+ollama_cache/
+llm_cache/
+
+# FFmpeg temporary files
+ffmpeg_*.log
+concat_*.txt
+
+# JSON test files
+*_test.json
+edl_test.json
+
+# Virtual environment variations
+.venv*/
+venv*/

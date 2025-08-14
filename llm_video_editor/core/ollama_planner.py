@@ -3,6 +3,7 @@ Ollama-based planning module for local LLM inference.
 """
 import json
 import requests
+import re
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
@@ -148,7 +149,7 @@ Be precise, concise, and focus on the most impactful content segments."""
         response = self.llm.invoke(messages)
         
         # Parse and validate EDL
-        edl_data = self._parse_edl_response(response.content)
+        edl_data = self._parse_edl_response_with_fallback(response.content)
         edl = self._create_edl_object(edl_data, target_platform, media_info)
         
         return edl
@@ -177,10 +178,22 @@ Be precise, concise, and focus on the most impactful content segments."""
             else:  # Already a dict
                 scenes_dict.append(scene)
         
+        # Handle both dict and object media_info formats
+        if hasattr(media_info, 'duration'):
+            # MediaInfo object
+            duration = media_info.duration
+            aspect_ratio = f"{media_info.width}:{media_info.height}"
+        else:
+            # Dict format
+            duration = media_info.get('duration', 0)
+            width = media_info.get('width', 1920)
+            height = media_info.get('height', 1080)
+            aspect_ratio = f"{width}:{height}"
+        
         return {
             "media_info": {
-                "duration": media_info.duration,
-                "aspect_ratio": f"{media_info.width}:{media_info.height}"
+                "duration": duration,
+                "aspect_ratio": aspect_ratio
             },
             "transcript_sample": limited_transcript,
             "scenes_sample": scenes_dict,
@@ -232,6 +245,230 @@ GENERATE JSON EDL:
 Generate JSON now:"""
         
         return prompt
+    
+    def _parse_edl_response_with_fallback(self, response: str) -> Dict[str, Any]:
+        """
+        Parse EDL response with multiple fallback strategies.
+        Handles markdown blocks, plain text, and malformed JSON.
+        """
+        # Strategy 1: Try base parser first (handles basic JSON extraction)
+        try:
+            return self._parse_edl_response(response)
+        except (json.JSONDecodeError, ValueError) as base_error:
+            print(f"Base parser failed: {base_error}")
+        
+        # Strategy 2: Extract from markdown code blocks
+        try:
+            return self._extract_json_from_markdown(response)
+        except (json.JSONDecodeError, ValueError) as md_error:
+            print(f"Markdown parser failed: {md_error}")
+        
+        # Strategy 3: Multi-step parsing with text analysis
+        try:
+            return self._parse_text_to_json(response)
+        except Exception as text_error:
+            print(f"Text-to-JSON parser failed: {text_error}")
+        
+        # Strategy 4: Create basic fallback EDL
+        return self._create_fallback_edl(response)
+    
+    def _extract_json_from_markdown(self, response: str) -> Dict[str, Any]:
+        """Extract JSON from markdown code blocks."""
+        # Look for ```json or ```JSON blocks
+        json_pattern = r'```(?:json|JSON)?\s*(\{.*?\})\s*```'
+        matches = re.findall(json_pattern, response, re.DOTALL)
+        
+        if matches:
+            # Try each match, with comment removal if needed
+            for match in matches:
+                try:
+                    return json.loads(match)
+                except json.JSONDecodeError:
+                    # Try removing comments and parsing again
+                    try:
+                        cleaned_match = self._remove_json_comments(match)
+                        return json.loads(cleaned_match)
+                    except json.JSONDecodeError:
+                        continue
+        
+        # Look for any JSON-like structure in code blocks
+        code_block_pattern = r'```[^`]*(\{.*?\})[^`]*```'
+        matches = re.findall(code_block_pattern, response, re.DOTALL)
+        
+        for match in matches:
+            try:
+                return json.loads(match)
+            except json.JSONDecodeError:
+                # Try removing comments and parsing again
+                try:
+                    cleaned_match = self._remove_json_comments(match)
+                    return json.loads(cleaned_match)
+                except json.JSONDecodeError:
+                    continue
+        
+        raise ValueError("No valid JSON found in markdown blocks")
+    
+    def _remove_json_comments(self, json_str: str) -> str:
+        """Remove // comments from JSON string while preserving string content."""
+        lines = json_str.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Find // but not in strings
+            comment_pos = -1
+            in_string = False
+            escaped = False
+            
+            for i, char in enumerate(line):
+                if escaped:
+                    escaped = False
+                    continue
+                    
+                if char == '\\':
+                    escaped = True
+                    continue
+                    
+                if char == '"' and not escaped:
+                    in_string = not in_string
+                    continue
+                    
+                if not in_string and char == '/' and i + 1 < len(line) and line[i + 1] == '/':
+                    comment_pos = i
+                    break
+            
+            if comment_pos >= 0:
+                cleaned_lines.append(line[:comment_pos].rstrip())
+            else:
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
+    
+    def _parse_text_to_json(self, response: str) -> Dict[str, Any]:
+        """
+        Parse natural language response into structured JSON.
+        Creates EDL from text descriptions and step-by-step instructions.
+        """
+        # Extract key information using regex patterns
+        duration_pattern = r'(?:duration|length|time):\s*(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)?'
+        clip_pattern = r'clip[^:]*:\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)'
+        
+        # Find target duration
+        duration_match = re.search(duration_pattern, response, re.IGNORECASE)
+        target_duration = float(duration_match.group(1)) if duration_match else 60.0
+        
+        # Find clip time ranges
+        clip_matches = re.findall(clip_pattern, response, re.IGNORECASE)
+        
+        clips = []
+        for i, (start, end) in enumerate(clip_matches[:5]):  # Limit to 5 clips
+            clips.append({
+                "clip_id": f"clip_{i+1:03d}",
+                "source": "input_video",
+                "start_time": float(start),
+                "end_time": float(end),
+                "operations": [
+                    {"type": "reframe", "params": {"target_aspect": "9:16", "focus": "center"}},
+                    {"type": "audio_adjust", "params": {"normalize": True, "target_lufs": -16}}
+                ]
+            })
+        
+        # If no clips found, create from step-by-step instructions
+        if not clips:
+            clips = self._extract_steps_to_clips(response, target_duration)
+        
+        return {
+            "target_duration": target_duration,
+            "clips": clips,
+            "global_operations": [
+                {"type": "platform_export", "params": {"format": "reels"}}
+            ]
+        }
+    
+    def _extract_steps_to_clips(self, response: str, target_duration: float) -> List[Dict[str, Any]]:
+        """Extract steps from text and convert to clips."""
+        # Look for step patterns
+        step_patterns = [
+            r'(?:step|phase|part)\s*\d+[:\.]?\s*([^\n\r]+)',
+            r'\d+[\.\)]\s*([^\n\r]+)',
+            r'(?:first|second|third|then|next|finally)[:\.]?\s*([^\n\r]+)'
+        ]
+        
+        steps = []
+        for pattern in step_patterns:
+            matches = re.findall(pattern, response, re.IGNORECASE)
+            if matches:
+                steps.extend(matches[:3])  # Limit to 3 steps
+                break
+        
+        # Convert steps to time segments
+        clips = []
+        if steps:
+            segment_duration = target_duration / len(steps)
+            for i, step in enumerate(steps):
+                start_time = i * segment_duration
+                end_time = min((i + 1) * segment_duration, target_duration)
+                
+                clips.append({
+                    "clip_id": f"step_{i+1:03d}",
+                    "source": "input_video",
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "operations": [
+                        {"type": "reframe", "params": {"target_aspect": "9:16", "focus": "center"}},
+                        {"type": "subtitle", "params": {
+                            "text": step.strip()[:50], 
+                            "start": start_time, 
+                            "end": end_time,
+                            "style": "center_overlay"
+                        }},
+                        {"type": "audio_adjust", "params": {"normalize": True, "target_lufs": -16}}
+                    ]
+                })
+        else:
+            # Create single default clip
+            clips = [{
+                "clip_id": "default_001",
+                "source": "input_video", 
+                "start_time": 0.0,
+                "end_time": min(target_duration, 30.0),
+                "operations": [
+                    {"type": "reframe", "params": {"target_aspect": "9:16", "focus": "center"}},
+                    {"type": "audio_adjust", "params": {"normalize": True, "target_lufs": -16}}
+                ]
+            }]
+        
+        return clips
+    
+    def _create_fallback_edl(self, response: str) -> Dict[str, Any]:
+        """Create a basic fallback EDL when all parsing fails."""
+        print(f"Creating fallback EDL for response: {response[:200]}...")
+        
+        return {
+            "target_duration": 30.0,
+            "clips": [{
+                "clip_id": "fallback_001",
+                "source": "input_video",
+                "start_time": 0.0,
+                "end_time": 30.0,
+                "operations": [
+                    {"type": "reframe", "params": {"target_aspect": "9:16", "focus": "center"}},
+                    {"type": "subtitle", "params": {
+                        "text": "Generated content", 
+                        "start": 0.0, 
+                        "end": 30.0,
+                        "style": "center_overlay"
+                    }},
+                    {"type": "audio_adjust", "params": {"normalize": True, "target_lufs": -16}}
+                ]
+            }],
+            "global_operations": [
+                {"type": "platform_export", "params": {"format": "reels"}}
+            ],
+            "metadata": {
+                "fallback_used": True,
+                "original_response": response[:500]
+            }
+        }
 
 
 def create_ollama_planner(model_name: str = "llama3.2", base_url: str = "http://localhost:11434") -> OllamaVideoPlanner:
