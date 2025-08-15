@@ -438,3 +438,18 @@ def render_video_from_edl(
         return renderer.render_edl(edl, source_file, output_dir, progress_callback)
     finally:
         renderer.cleanup()
+
+
+# NEW helper inside renderer.py
+def apply_insertions(timeline: list) -> list:
+    """If any clip has visual_ops with {"type":"broll_under","asset":...},
+    record overlay markers for downstream filtergraph. This is a minimal 
+    no-op
+    that keeps compatibility if you already have an overlay path.
+    """
+    for c in timeline:
+        ops = c.get("visual_ops", [])
+        for op in ops:
+            if op.get("type") == "broll_under":
+                c.setdefault("_underlay", []).append(op["asset"])  # picked up by your filtergraph builder
+    return timeline

@@ -11,6 +11,8 @@ An intelligent, prompt-driven video router/editor that processes video content a
 - **Professional Video Rendering**: GPU-accelerated video processing with FFmpeg
 - **Complete Offline Processing**: All processing runs locally - no external dependencies
 - **Smart Reframing**: Automatic aspect ratio conversion (16:9 to 9:16) with intelligent cropping
+- **Generative B-roll**: AI-generated video content using Open-Sora v2 (text→video) and Stable Video Diffusion 1.1 (image→video)
+- **Conversational CLI**: Natural-language interface for interactive video editing with prompt clarification
 
 ## 🚀 Quick Start
 
@@ -84,6 +86,12 @@ results = renderer.render_edl(edl, "input.mp4", "output/")
 print(f"Final video: {results['final_video']}")
 ```
 
+**Conversational CLI:**
+```bash
+llm-video-router chat
+# Commands: add <path>, add-image <path>, edit, t2v, i2v, merge, list, quit
+```
+
 **Command Line (Coming Soon):**
 ```bash
 # Create a 60s Instagram Reel
@@ -141,6 +149,39 @@ Input Video → Media Probe → ASR + Scene Detection → Ollama LLM Planning �
 | YouTube  | 1920x1080 | 16:9        | 1 hour       | 10 minutes       |
 | Reels    | 1080x1920 | 9:16        | 90s          | 30s              |
 | TikTok   | 1080x1920 | 9:16        | 3 minutes    | 60s              |
+
+## 🎨 Generative B-roll
+
+### Text→Video (Open-Sora v2)
+Set `OPEN_SORA_CMD` to your local infer script, or `OPEN_SORA_HOST` to a running server.
+
+### Image→Video (SVD 1.1)
+Install `diffusers`, `torch`, `accelerate`, accept the model license on Hugging Face.
+
+```bash
+# Example usage in conversational CLI
+llm-video-router chat
+> t2v
+Prompt for b-roll (text→video): foggy city skyline timelapse, cinematic
+Seconds [4]: 6
+Resolution (e.g., 576x1024) [576x1024]: 
+```
+
+### Conversational CLI
+
+```bash
+llm-video-router chat
+```
+
+Available commands:
+- `add <video_path>` - Add video asset to workspace
+- `add-image <image_path>` - Add image asset for I2V generation
+- `edit` - Edit video with natural language prompts
+- `t2v` - Generate text-to-video B-roll clips
+- `i2v` - Generate image-to-video B-roll clips  
+- `merge` - Combine multiple video assets
+- `list` - Show all assets in workspace
+- `quit` - Exit the interface
 
 ## 🔧 CLI Commands
 
