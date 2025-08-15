@@ -14,6 +14,12 @@ An intelligent, prompt-driven video router/editor that processes video content a
 - **Generative B-roll**: AI-generated video content using Open-Sora v2 (text→video) and Stable Video Diffusion 1.1 (image→video)
 - **Conversational CLI**: Natural-language interface for interactive video editing with prompt clarification
 
+## 🎬 Workflow Demo
+
+![LLM Video Editor Workflow](https://github.com/user-attachments/assets/workflow-demo.gif)
+
+*Complete workflow demonstration: from prompt input to rendered 5-second Instagram Reel with quality validation*
+
 ## 🚀 Quick Start
 
 ### Installation
