@@ -1,0 +1,194 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-video-editor"
+version = "0.2.0"
+description = "Intelligent, prompt-driven video router/editor with LLM-based planning and pro polish features"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "LLM Video Editor Team", email = "team@llm-video-editor.dev"}
+]
+keywords = ["video", "editing", "llm", "ai", "automation", "reels", "youtube"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.11"
+
+# Core dependencies
+dependencies = [
+    "langgraph==0.2.34",
+    "langchain==0.3.1",
+    "langchain-openai==0.2.1",
+    "faster-whisper==1.0.3",
+    "scenedetect==0.6.4",
+    "moviepy==1.0.3",
+    "opentimelineio==0.17.0",
+    "torch==2.4.1",
+    "torchaudio==2.4.1",
+    "transformers==4.45.2",
+    "click==8.1.7",
+    "tqdm==4.66.5",
+    "python-dotenv==1.0.1",
+    "pydantic==2.9.2",
+    "requests==2.32.3",
+    "numpy==1.26.4",
+    "opencv-python==4.10.0.84",
+    "Pillow==10.4.0",
+]
+
+[project.optional-dependencies]
+# Pro polish features (optional for advanced functionality)
+pro = [
+    "ultralytics==8.3.4",  # YOLO models for object detection
+    "demucs==4.0.1",       # Audio source separation for music ducking
+    "librosa==0.10.2",     # Audio analysis and processing
+    "soundfile==0.12.1",   # Audio file I/O
+    "yolox==0.3.0",        # ByteTrack for object tracking
+]
+
+# Development and testing
+dev = [
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "black==24.8.0",
+    "flake8==7.1.1",
+    "mypy==1.11.2",
+]
+
+# Complete installation with all features
+all = [
+    "llm-video-editor[pro,dev]"
+]
+
+[project.scripts]
+llm-video-router = "llm_video_editor.cli:main"
+llm-video-editor = "llm_video_editor.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/your-org/llm-video-editor"
+Documentation = "https://docs.llm-video-editor.dev"
+Repository = "https://github.com/your-org/llm-video-editor"
+Issues = "https://github.com/your-org/llm-video-editor/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llm_video_editor*"]
+
+[tool.setuptools.package-data]
+llm_video_editor = ["py.typed"]
+
+# uv configuration
+[tool.uv]
+dev-dependencies = [
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "black==24.8.0",
+    "flake8==7.1.1",
+    "mypy==1.11.2",
+]
+
+# uv workspace configuration
+[tool.uv.workspace]
+members = ["."]
+
+# Python version management
+[tool.uv.sources]
+# Use specific Python version for reproducibility
+python = "3.11"
+
+# Black formatter configuration
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+# MyPy type checking configuration
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "cv2.*",
+    "moviepy.*",
+    "scenedetect.*",
+    "faster_whisper.*",
+    "ultralytics.*",
+    "demucs.*",
+    "librosa.*",
+    "soundfile.*",
+    "yolox.*",
+]
+ignore_missing_imports = true
+
+# Pytest configuration
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["llm_video_editor"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "setup.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

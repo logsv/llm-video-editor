@@ -1,41 +1,41 @@
 # Core dependencies
-langgraph>=0.0.40
-langchain>=0.1.0
-langchain-openai>=0.1.0
+langgraph==0.2.34
+langchain==0.3.1
+langchain-openai==0.2.1
 
 # Audio/Video processing
-faster-whisper>=0.10.0
-scenedetect>=0.6.2
-moviepy>=1.0.3
-opentimelineio>=0.15.0
+faster-whisper==1.0.3
+scenedetect==0.6.4
+moviepy==1.0.3
+opentimelineio==0.17.0
 
 # ML/AI
-torch>=2.0.0
-torchaudio>=2.0.0
-transformers>=4.30.0
+torch==2.4.1
+torchaudio==2.4.1
+transformers==4.45.2
 
 # CLI and utilities
-click>=8.0.0
-tqdm>=4.64.0
-python-dotenv>=1.0.0
-pydantic>=2.0.0
-requests>=2.25.0
+click==8.1.7
+tqdm==4.66.5
+python-dotenv==1.0.1
+pydantic==2.9.2
+requests==2.32.3
 
 # Data processing
-numpy>=1.24.0
-opencv-python>=4.8.0
-Pillow>=10.0.0
+numpy==1.26.4
+opencv-python==4.10.0.84
+Pillow==10.4.0
 
 # Pro polish features
-ultralytics>=8.0.0  # YOLO models for object detection
-demucs>=4.0.0  # Audio source separation for music ducking
-librosa>=0.10.0  # Audio analysis and processing
-soundfile>=0.12.0  # Audio file I/O
-yolox>=0.3.0  # ByteTrack for object tracking (optional)
+ultralytics==8.3.4  # YOLO models for object detection
+demucs==4.0.1  # Audio source separation for music ducking
+librosa==0.10.2  # Audio analysis and processing
+soundfile==0.12.1  # Audio file I/O
+yolox==0.3.0  # ByteTrack for object tracking (optional)
 
 # Development and testing
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-black>=23.0.0
-flake8>=6.0.0
-mypy>=1.5.0
+pytest==8.3.3
+pytest-asyncio==0.24.0
+black==24.8.0
+flake8==7.1.1
+mypy==1.11.2

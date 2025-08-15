@@ -19,7 +19,22 @@ An intelligent, prompt-driven video router/editor that processes video content a
 - **Video Processing**: MoviePy + FFmpeg with NVENC acceleration
 - **Export**: OpenTimelineIO (OTIO) for professional interchange
 
-## Environment Setup
+## Environment Setup with uv (Recommended)
+```bash
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Or: brew install uv
+
+# Setup project environment
+./setup_environment.sh
+
+# Manual setup alternative
+uv python install 3.11  # Install Python 3.11
+uv sync                  # Create environment and install dependencies
+uv add --optional pro    # Install pro polish features (YOLO, Demucs, etc.)
+```
+
+## Legacy conda setup (Alternative)
 ```bash
 # Create conda environment
 conda create -n llm-video-editor python=3.11
@@ -31,13 +46,19 @@ pip install -r requirements.txt
 
 ## Usage
 ```bash
+# With uv (recommended)
+uv run llm-video-router --in ./videos --prompt "60s reel: top 3 takeaways, captions, upbeat" --target reels
+
+# Direct execution (if activated)
 llm-video-router --in ./videos --prompt "60s reel: top 3 takeaways, captions, upbeat" --target reels
 ```
 
 ## Development Commands
-- `python -m pytest tests/` - Run tests
-- `python -m llm_video_editor.cli --help` - Show CLI help
-- `conda env export > environment.yml` - Export environment
+- `uv run pytest tests/` - Run tests
+- `uv run llm-video-router --help` - Show CLI help
+- `uv add package-name` - Add new dependency
+- `uv sync` - Sync dependencies with pyproject.toml
+- `uv python list` - List available Python versions
 
 ## Dependencies
 See requirements.txt for full list of dependencies including:
