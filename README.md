@@ -18,7 +18,24 @@ An intelligent, prompt-driven video router/editor that processes video content a
 
 ### Installation
 
-1. **Install Ollama** (for local LLM support)
+1. **Install uv** (Modern Python package manager)
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   # Or: brew install uv
+   ```
+
+2. **Setup Project Environment**
+   ```bash
+   # Clone and setup (automated)
+   ./setup_environment.sh
+   
+   # Or manual setup
+   uv python install 3.11  # Install Python 3.11
+   uv sync                  # Create environment and install dependencies
+   uv add --optional pro    # Install pro polish features (YOLO, Demucs, etc.)
+   ```
+
+3. **Install Ollama** (for local LLM support)
    ```bash
    # macOS
    brew install ollama
@@ -30,19 +47,7 @@ An intelligent, prompt-driven video router/editor that processes video content a
    ollama pull llama3.1
    ```
 
-2. **Create Python Environment**
-   ```bash
-   # Using conda (recommended)
-   conda env create -f environment.yml
-   conda activate llm-video-editor
-   
-   # Or using venv
-   python -m venv venv
-   source venv/bin/activate  # Linux/macOS
-   # or venv\Scripts\activate  # Windows
-   ```
-
-3. **Install FFmpeg**
+4. **Install FFmpeg**
    ```bash
    # macOS
    brew install ffmpeg
@@ -51,11 +56,6 @@ An intelligent, prompt-driven video router/editor that processes video content a
    sudo apt update && sudo apt install ffmpeg
    
    # Windows: Download from https://ffmpeg.org/
-   ```
-
-4. **Install Package**
-   ```bash
-   pip install -e .
    ```
 
 ### Basic Usage
@@ -88,22 +88,27 @@ print(f"Final video: {results['final_video']}")
 
 **Conversational CLI:**
 ```bash
+# Start interactive CLI
+uv run llm-video-router --use-ollama --ollama-model gpt-oss:latest
+
+# Alternative: Start chat mode directly
 llm-video-router chat
 # Commands: add <path>, add-image <path>, edit, t2v, i2v, merge, list, quit
 ```
 
-**Command Line (Coming Soon):**
+**Command Line:**
 ```bash
-# Create a 60s Instagram Reel
-llm-video-router -i video.mp4 -p "60s reel: top 3 takeaways, captions" -t reels
+# With uv (recommended)
+uv run llm-video-router --use-ollama --ollama-model gpt-oss:latest --in ./videos --prompt "60s reel: top 3 takeaways, captions, upbeat" --target reels
 
-# Process multiple videos for YouTube  
-llm-video-router -i ./videos -p "10min compilation: best moments" -t youtube
+# Direct execution (if environment activated)
+llm-video-router --use-ollama --ollama-model llama3.1 --in ./videos --prompt "10min compilation: best moments" --target youtube
 ```
 
 ## 📋 Requirements
 
 ### System Dependencies
+- **uv** (Modern Python package manager - recommended)
 - **Ollama** (for local LLM inference)
 - **FFmpeg** (with VideoToolbox/NVENC support for GPU acceleration)
 - **Python 3.11+**
@@ -190,10 +195,12 @@ Available commands:
 llm-video-router [OPTIONS]
 
 Options:
-  -i, --input PATH       Input video file or directory [required]
-  -p, --prompt TEXT      Editing prompt [required]
-  -t, --target CHOICE    Target platform (youtube|reels|tiktok)
-  -o, --output PATH      Output directory
+  --in PATH              Input video file or directory [required]
+  --prompt TEXT          Editing prompt [required]
+  --target CHOICE        Target platform (youtube|reels|tiktok)
+  --out PATH             Output directory
+  --use-ollama           Use Ollama for local LLM inference
+  --ollama-model TEXT    Ollama model name (e.g., llama3.1, gpt-oss:latest)
   --asr-model CHOICE     Whisper model size
   --scene-threshold FLOAT Scene detection threshold
   --language TEXT        Language code for ASR
@@ -319,9 +326,11 @@ python test_concat_fix.py       # Video concatenation
 ```bash
 git clone <repository>
 cd llm-video-editor
-conda env create -f environment.yml
-conda activate llm-video-editor
-pip install -e .
+
+# Using uv (recommended)
+uv python install 3.11
+uv sync
+uv add --optional pro
 
 # Install Ollama and pull model
 ollama serve &
@@ -330,8 +339,8 @@ ollama pull llama3.1
 
 ### Run Tests
 ```bash
-python -m pytest tests/         # Unit tests
-python test_ollama_workflow.py  # End-to-end test
+uv run pytest tests/            # Unit tests  
+uv run python test_ollama_workflow.py  # End-to-end test
 ```
 
 ### Code Quality
@@ -371,12 +380,10 @@ llm-video-router -i ./videos/ -p "social media cuts" -t reels
 
 1. **FFmpeg not found**
    ```bash
-   # Install via conda
-   conda install ffmpeg
-   
-   # Or system package manager
+   # System package manager
    apt-get install ffmpeg  # Ubuntu
    brew install ffmpeg     # macOS
+   # Windows: Download from https://ffmpeg.org/
    ```
 
 2. **CUDA/GPU issues**
@@ -391,7 +398,7 @@ llm-video-router -i ./videos/ -p "social media cuts" -t reels
 3. **Memory issues with large models**
    ```bash
    # Use smaller Whisper model
-   llm-video-router --asr-model medium
+   uv run llm-video-router --asr-model medium
    ```
 
 ## 📄 License
