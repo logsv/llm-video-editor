@@ -45,8 +45,8 @@ class VideoEditingWorkflow:
         self,
         asr_model: str = "large-v3",
         scene_threshold: float = 27.0,
-        planner_model: str = "gpt-4",
-        use_ollama: bool = False,
+        planner_model: str = "llama3.2:latest",
+        use_ollama: bool = True,
         ollama_base_url: str = "http://localhost:11434",
         enable_rendering: bool = True
     ):
@@ -477,8 +477,8 @@ class VideoEditingWorkflow:
 def create_workflow(
     asr_model: str = "large-v3",
     scene_threshold: float = 27.0,
-    planner_model: str = "gpt-4",
-    use_ollama: bool = False,
+    planner_model: str = "llama3.2:latest",
+    use_ollama: bool = True,
     ollama_base_url: str = "http://localhost:11434",
     enable_rendering: bool = True
 ) -> VideoEditingWorkflow:
