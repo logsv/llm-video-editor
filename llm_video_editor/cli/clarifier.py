@@ -35,6 +35,10 @@ def clarify(raw_prompt: str):
             obj = json.loads(msg)
             if obj.get("status") == "ok":
                 return "ok", obj.get("fields", {})
+            else:
+                # Status is not "ok", treat as needing more info
+                print("Clarifier questions:\n" + msg)
+                return "need_more", None
         except Exception:
             print("Clarifier questions:\n" + msg)
             return "need_more", None

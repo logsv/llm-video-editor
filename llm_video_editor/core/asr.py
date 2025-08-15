@@ -74,12 +74,26 @@ class ASRProcessor:
             raise FileNotFoundError(f"File not found: {filepath}")
         
         print(f"Transcribing: {filepath}")
-        segments, info = self.model.transcribe(
-            filepath,
-            language=language,
-            vad_filter=vad_filter,
-            word_timestamps=word_timestamps
-        )
+        
+        try:
+            segments, info = self.model.transcribe(
+                filepath,
+                language=language,
+                vad_filter=vad_filter,
+                word_timestamps=word_timestamps
+            )
+        except ValueError as e:
+            if "empty sequence" in str(e):
+                print("No speech detected in audio, defaulting to English")
+                # Fallback to English when no language can be detected
+                segments, info = self.model.transcribe(
+                    filepath,
+                    language="en",
+                    vad_filter=vad_filter,
+                    word_timestamps=word_timestamps
+                )
+            else:
+                raise
         
         transcript_segments = []
         for segment in tqdm(segments, desc="Processing segments"):

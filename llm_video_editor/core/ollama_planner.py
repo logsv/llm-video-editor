@@ -131,13 +131,16 @@ Be precise, concise, and focus on the most impactful content segments."""
         """
         Generate EDL using Ollama with optimized prompting for local models.
         """
+        # Extract duration from user prompt first
+        extracted_duration = self._extract_duration_from_prompt(prompt)
+        
         # Prepare simplified context for better local model performance
         context = self._prepare_simplified_context(
             transcript_segments, scenes, media_info, target_platform
         )
         
         # Create optimized planning prompt for local models
-        planning_prompt = self._create_local_planning_prompt(prompt, context, target_platform)
+        planning_prompt = self._create_local_planning_prompt(prompt, context, target_platform, extracted_duration)
         
         # Create messages
         messages = [
@@ -145,14 +148,58 @@ Be precise, concise, and focus on the most impactful content segments."""
             {"role": "user", "content": planning_prompt}
         ]
         
+        # Show the prompt being sent for debugging
+        print(f"\n📝 Prompt sent to Ollama:")
+        print("-" * 60)
+        print(planning_prompt)
+        print("-" * 60)
+        
         # Get response from Ollama
         response = self.llm.invoke(messages)
         
-        # Parse and validate EDL
-        edl_data = self._parse_edl_response_with_fallback(response.content)
+        # Print the raw response for debugging
+        print(f"\n🤖 Ollama Planning Response:")
+        print("=" * 60)
+        print(response.content)
+        print("=" * 60)
+        
+        if extracted_duration:
+            print(f"📏 Extracted Duration: {extracted_duration}s from prompt")
+        
+        # Parse and validate EDL, using extracted duration if available
+        edl_data = self._parse_edl_response_with_fallback(response.content, extracted_duration)
+        
+        print(f"\n✅ Parsed EDL Data:")
+        print(f"   Target Duration: {edl_data.get('target_duration', 'unknown')}s")
+        print(f"   Number of Clips: {len(edl_data.get('clips', []))}")
+        print(f"   Target Platform: {edl_data.get('target_platform', 'unknown')}")
+        
         edl = self._create_edl_object(edl_data, target_platform, media_info)
         
         return edl
+    
+    def _extract_duration_from_prompt(self, prompt: str) -> Optional[float]:
+        """Extract duration from user prompt like '5s reel', '30 second video', etc."""
+        import re
+        
+        # Various patterns to match duration in prompts
+        patterns = [
+            r'(\d+(?:\.\d+)?)\s*s(?:ec|econd|econds?)?\s+(?:reel|video|clip)',  # "5s reel", "30 second video"
+            r'(\d+(?:\.\d+)?)\s*(?:s|sec|second|seconds|min|minute|minutes)\b',  # "5s", "30sec", "2min"
+            r'(?:^|\s)(\d+(?:\.\d+)?)\s*(?:s|sec)(?:\s|$)',  # standalone "5s" 
+            r'(\d+(?:\.\d+)?)\s*(?:second|seconds|minute|minutes)',  # "5 seconds"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, prompt, re.IGNORECASE)
+            if match:
+                duration = float(match.group(1))
+                # Convert minutes to seconds if needed
+                if 'min' in prompt.lower():
+                    duration *= 60
+                return duration
+        
+        return None
     
     def _prepare_simplified_context(
         self,
@@ -200,11 +247,16 @@ Be precise, concise, and focus on the most impactful content segments."""
             "platform_specs": self._get_platform_specs(target_platform)
         }
     
-    def _create_local_planning_prompt(self, user_prompt: str, context: Dict[str, Any], target_platform: str) -> str:
+    def _create_local_planning_prompt(self, user_prompt: str, context: Dict[str, Any], target_platform: str, extracted_duration: Optional[float] = None) -> str:
         """Create optimized prompt for local models."""
         platform_specs = context["platform_specs"]
         
-        prompt = f"""Create an Edit Decision List for: "{user_prompt}"
+        # Add duration instruction if extracted from user prompt
+        duration_instruction = ""
+        if extracted_duration:
+            duration_instruction = f"\n⚠️  IMPORTANT: Target duration must be EXACTLY {extracted_duration}s (user specified)\n"
+        
+        prompt = f"""Create an Edit Decision List for: "{user_prompt}"{duration_instruction}
 
 TARGET: {target_platform.upper()}
 - Max duration: {platform_specs['max_duration']}s  
@@ -246,31 +298,44 @@ Generate JSON now:"""
         
         return prompt
     
-    def _parse_edl_response_with_fallback(self, response: str) -> Dict[str, Any]:
+    def _parse_edl_response_with_fallback(self, response: str, extracted_duration: Optional[float] = None) -> Dict[str, Any]:
         """
         Parse EDL response with multiple fallback strategies.
         Handles markdown blocks, plain text, and malformed JSON.
         """
         # Strategy 1: Try base parser first (handles basic JSON extraction)
         try:
-            return self._parse_edl_response(response)
+            result = self._parse_edl_response(response)
+            # Override target duration if extracted from user prompt
+            if extracted_duration:
+                result["target_duration"] = extracted_duration
+            return result
         except (json.JSONDecodeError, ValueError) as base_error:
             print(f"Base parser failed: {base_error}")
         
         # Strategy 2: Extract from markdown code blocks
         try:
-            return self._extract_json_from_markdown(response)
+            result = self._extract_json_from_markdown(response)
+            if extracted_duration:
+                result["target_duration"] = extracted_duration
+            return result
         except (json.JSONDecodeError, ValueError) as md_error:
             print(f"Markdown parser failed: {md_error}")
         
         # Strategy 3: Multi-step parsing with text analysis
         try:
-            return self._parse_text_to_json(response)
+            result = self._parse_text_to_json(response)
+            if extracted_duration:
+                result["target_duration"] = extracted_duration
+            return result
         except Exception as text_error:
             print(f"Text-to-JSON parser failed: {text_error}")
         
         # Strategy 4: Create basic fallback EDL
-        return self._create_fallback_edl(response)
+        result = self._create_fallback_edl(response)
+        if extracted_duration:
+            result["target_duration"] = extracted_duration
+        return result
     
     def _extract_json_from_markdown(self, response: str) -> Dict[str, Any]:
         """Extract JSON from markdown code blocks."""
@@ -352,7 +417,7 @@ Generate JSON now:"""
         duration_pattern = r'(?:duration|length|time):\s*(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)?'
         clip_pattern = r'clip[^:]*:\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)'
         
-        # Find target duration
+        # Find target duration from response
         duration_match = re.search(duration_pattern, response, re.IGNORECASE)
         target_duration = float(duration_match.group(1)) if duration_match else 60.0
         
