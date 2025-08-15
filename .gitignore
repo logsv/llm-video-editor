@@ -81,7 +81,7 @@ logs/
 *.jpg
 *.jpeg
 *.png
-*.gif
+//*.gif
 *.bmp
 *.tiff
 
