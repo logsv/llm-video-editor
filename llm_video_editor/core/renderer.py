@@ -9,6 +9,9 @@ from dataclasses import dataclass
 import tempfile
 
 from .planner import EditDecisionList, EDLClip
+from .smart_reframing import SmartReframer, fallback_to_autoflip_style
+from .music_ducking import MusicDucker, DuckingProfile
+from .quality_control import QualityController
 from ..utils.ffmpeg_utils import FFmpegProcessor
 from ..presets.platform_presets import get_ffmpeg_preset, get_subtitle_style
 
@@ -27,15 +30,27 @@ class RenderJob:
 class VideoRenderer:
     """Video renderer that applies EDL operations and creates output videos."""
     
-    def __init__(self, use_gpu: bool = True):
+    def __init__(self, use_gpu: bool = True, enable_smart_reframing: bool = True, enable_music_ducking: bool = True, enable_qc: bool = True):
         """
         Initialize video renderer.
         
         Args:
             use_gpu: Whether to use GPU acceleration for rendering
+            enable_smart_reframing: Whether to use YOLO-based smart reframing
+            enable_music_ducking: Whether to enable music ducking with Demucs
+            enable_qc: Whether to perform quality control checks
         """
         self.use_gpu = use_gpu and FFmpegProcessor.check_gpu_acceleration()
         self.temp_files = []  # Track temporary files for cleanup
+        
+        # Initialize pro features
+        self.smart_reframer = SmartReframer() if enable_smart_reframing else None
+        self.music_ducker = MusicDucker() if enable_music_ducking else None
+        self.quality_controller = QualityController() if enable_qc else None
+        
+        self.enable_smart_reframing = enable_smart_reframing
+        self.enable_music_ducking = enable_music_ducking
+        self.enable_qc = enable_qc
     
     def render_edl(
         self,
@@ -103,8 +118,27 @@ class VideoRenderer:
             success = self._concatenate_clips(clip_files, final_output)
             
             if success:
-                results["final_video"] = final_output
-                print(f"   ✅ Final video created: {final_output}")
+                # Apply music ducking if enabled
+                if self.enable_music_ducking and self.music_ducker:
+                    try:
+                        ducked_output = os.path.join(output_dir, f"{edl.target_platform}_ducked.mp4")
+                        ducking_results = self.music_ducker.create_ducked_mix(
+                            final_output, ducked_output
+                        )
+                        if ducking_results.get("output_video"):
+                            results["final_video"] = ducked_output
+                            results["ducked_audio"] = ducking_results.get("ducked_music")
+                            print(f"   ✅ Music ducking applied: {ducked_output}")
+                        else:
+                            results["final_video"] = final_output
+                            print(f"   ⚠️ Music ducking failed, using original: {final_output}")
+                    except Exception as e:
+                        print(f"   ⚠️ Music ducking error: {e}")
+                        results["final_video"] = final_output
+                else:
+                    results["final_video"] = final_output
+                    
+                print(f"   ✅ Final video created: {results['final_video']}")
             else:
                 print(f"   ❌ Failed to create final video")
         
@@ -112,6 +146,42 @@ class VideoRenderer:
         subtitle_file = self._generate_subtitle_file(edl, output_dir)
         if subtitle_file:
             results["subtitle_file"] = subtitle_file
+        
+        # Step 4: Perform quality control checks if enabled
+        if self.enable_qc and self.quality_controller and results.get("final_video"):
+            try:
+                print("   🔍 Running quality control checks...")
+                qc_report = self.quality_controller.analyze_video_file(
+                    results["final_video"],
+                    expected_duration=edl.target_duration,
+                    check_black_frames=True,
+                    check_audio=True
+                )
+                
+                # Export QC report
+                qc_report_path = os.path.join(output_dir, "qc_report.json")
+                self.quality_controller.export_report(qc_report, qc_report_path, format="json")
+                results["qc_report"] = qc_report_path
+                
+                # Export HTML report for easier viewing
+                qc_html_path = os.path.join(output_dir, "qc_report.html")
+                self.quality_controller.export_report(qc_report, qc_html_path, format="html")
+                results["qc_report_html"] = qc_html_path
+                
+                if qc_report.passed:
+                    print(f"   ✅ Quality control: PASSED")
+                else:
+                    print(f"   ⚠️ Quality control: FAILED ({len(qc_report.errors)} errors)")
+                    for error in qc_report.errors[:3]:  # Show first 3 errors
+                        print(f"      - {error}")
+                
+                if qc_report.warnings:
+                    print(f"   ⚠️ QC Warnings: {len(qc_report.warnings)}")
+                    for warning in qc_report.warnings[:2]:  # Show first 2 warnings
+                        print(f"      - {warning}")
+                        
+            except Exception as e:
+                print(f"   ⚠️ Quality control error: {e}")
         
         if progress_callback:
             progress_callback(1.0)  # Complete
@@ -159,8 +229,31 @@ class VideoRenderer:
         for operation in clip.operations:
             if operation.type == "reframe":
                 target_aspect = operation.params.get("target_aspect")
-                if target_aspect == "9:16":
-                    # Reframe 16:9 to 9:16 (crop to center square, then scale)
+                
+                # Use smart reframing if enabled and available
+                if self.enable_smart_reframing and self.smart_reframer and target_aspect == "9:16":
+                    try:
+                        # Apply smart reframing instead of static crop
+                        crop_regions = self.smart_reframer.analyze_video_for_reframing(
+                            source_file, target_aspect=9/16, sample_interval=60
+                        )
+                        
+                        if crop_regions:
+                            # Use first crop region for this clip (could be enhanced for temporal alignment)
+                            region = crop_regions[0]
+                            filters.append(f"crop={region.width}:{region.height}:{region.x}:{region.y}")
+                            filters.append(f"scale={platform_preset['width']}:{platform_preset['height']}")
+                        else:
+                            # Fallback to center crop
+                            filters.append("crop=ih*9/16:ih:(iw-ih*9/16)/2:0")
+                            filters.append(f"scale={platform_preset['width']}:{platform_preset['height']}")
+                    except Exception as e:
+                        print(f"Smart reframing failed, using fallback: {e}")
+                        # Fallback to static center crop
+                        filters.append("crop=ih*9/16:ih:(iw-ih*9/16)/2:0")
+                        filters.append(f"scale={platform_preset['width']}:{platform_preset['height']}")
+                elif target_aspect == "9:16":
+                    # Static center crop fallback
                     filters.append("crop=ih*9/16:ih:(iw-ih*9/16)/2:0")
                     filters.append(f"scale={platform_preset['width']}:{platform_preset['height']}")
                 elif target_aspect == "16:9":
@@ -314,22 +407,33 @@ def render_video_from_edl(
     source_file: str,
     output_dir: str,
     use_gpu: bool = True,
+    enable_smart_reframing: bool = True,
+    enable_music_ducking: bool = True,
+    enable_qc: bool = True,
     progress_callback: Optional[callable] = None
 ) -> Dict[str, str]:
     """
-    Convenience function to render video from EDL.
+    Convenience function to render video from EDL with pro polish features.
     
     Args:
         edl: Edit Decision List
         source_file: Source video file path
         output_dir: Output directory
         use_gpu: Whether to use GPU acceleration
+        enable_smart_reframing: Whether to use YOLO-based smart reframing
+        enable_music_ducking: Whether to enable music ducking with Demucs
+        enable_qc: Whether to perform quality control checks
         progress_callback: Optional progress callback
         
     Returns:
         Dictionary with output file paths
     """
-    renderer = VideoRenderer(use_gpu=use_gpu)
+    renderer = VideoRenderer(
+        use_gpu=use_gpu,
+        enable_smart_reframing=enable_smart_reframing,
+        enable_music_ducking=enable_music_ducking,
+        enable_qc=enable_qc
+    )
     try:
         return renderer.render_edl(edl, source_file, output_dir, progress_callback)
     finally:

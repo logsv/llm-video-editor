@@ -26,6 +26,13 @@ numpy>=1.24.0
 opencv-python>=4.8.0
 Pillow>=10.0.0
 
+# Pro polish features
+ultralytics>=8.0.0  # YOLO models for object detection
+demucs>=4.0.0  # Audio source separation for music ducking
+librosa>=0.10.0  # Audio analysis and processing
+soundfile>=0.12.0  # Audio file I/O
+yolox>=0.3.0  # ByteTrack for object tracking (optional)
+
 # Development and testing
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
