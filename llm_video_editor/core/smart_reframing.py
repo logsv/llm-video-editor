@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 import torch
-import tempfile
 import subprocess
 
 try:
@@ -18,10 +17,19 @@ except ImportError:
     YOLO_AVAILABLE = False
 
 try:
-    from yolox.tracker.byte_tracker import BYTETracker
+    from yolox.tracker.byte_tracker import BYTETracker  # type: ignore
     BYTETRACK_AVAILABLE = True
 except ImportError:
     BYTETRACK_AVAILABLE = False
+
+
+@dataclass
+class DetectionResult:
+    """Container for object detection result."""
+    bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2
+    confidence: float
+    class_name: str
+    class_id: int
 
 
 @dataclass

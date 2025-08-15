@@ -70,7 +70,7 @@ def is_audio_file(filepath: str) -> bool:
     return extension in AUDIO_EXTENSIONS
 
 
-def validate_input_path(path: str) -> bool:
+def validate_input_path(path: str) -> Dict[str, Any]:
     """
     Validate that input path exists and contains video files.
     
@@ -78,19 +78,39 @@ def validate_input_path(path: str) -> bool:
         path: Input path
         
     Returns:
-        True if path is valid
+        Dictionary with validation results
     """
     path_obj = Path(path)
     
+    result = {
+        "path": path,
+        "exists": path_obj.exists(),
+        "valid": False,
+        "is_video": False,
+        "is_dir": False,
+        "error": None
+    }
+    
     if not path_obj.exists():
-        return False
+        result["error"] = "File not found"
+        return result
     
     if path_obj.is_file():
-        return is_video_file(path)
+        result["is_video"] = is_video_file(path)
+        if result["is_video"]:
+            result["valid"] = True
+        else:
+            result["error"] = "not a supported video format"
     elif path_obj.is_dir():
-        return len(find_video_files(path_obj)) > 0
+        result["is_dir"] = True
+        video_files = find_video_files(path_obj)
+        if len(video_files) > 0:
+            result["valid"] = True
+            result["video_count"] = len(video_files)
+        else:
+            result["error"] = "No video files found in directory"
     
-    return False
+    return result
 
 
 def get_file_info(filepath: str) -> Dict[str, Any]:
@@ -199,6 +219,9 @@ def get_safe_filename(filename: str) -> str:
     Returns:
         Safe filename
     """
+    if filename is None:
+        return ""
+    
     # Replace unsafe characters
     unsafe_chars = '<>:"/\\|?*'
     safe_name = filename
@@ -326,3 +349,47 @@ def organize_output_files(
             (base_path / subdir).mkdir(parents=True, exist_ok=True)
     
     return {k: str(base_path / v) for k, v in subdirs.items()}
+
+
+def get_project_structure() -> Dict[str, Any]:
+    """
+    Get project structure information.
+    
+    Returns:
+        Dictionary with project structure information
+    """
+    # Get the project root (assuming this file is in llm_video_editor/utils/)
+    current_file = Path(__file__)
+    project_root = current_file.parent.parent.parent
+    
+    structure = {}
+    
+    # Check for main project directories
+    main_dirs = ['llm_video_editor', 'tests', 'examples', 'docs']
+    for dir_name in main_dirs:
+        dir_path = project_root / dir_name
+        structure[dir_name] = {
+            'exists': dir_path.exists(),
+            'path': str(dir_path),
+            'is_dir': dir_path.is_dir() if dir_path.exists() else False
+        }
+        
+        if dir_path.exists() and dir_path.is_dir():
+            # Count files in directory
+            try:
+                files = list(dir_path.rglob('*'))
+                py_files = [f for f in files if f.suffix == '.py']
+                structure[dir_name]['total_files'] = len(files)
+                structure[dir_name]['python_files'] = len(py_files)
+            except:
+                structure[dir_name]['total_files'] = 0
+                structure[dir_name]['python_files'] = 0
+    
+    # Add project root info as a dict to match test expectations
+    structure['project_info'] = {
+        'project_root': str(project_root),
+        'has_pyproject_toml': (project_root / 'pyproject.toml').exists(),
+        'has_requirements_txt': (project_root / 'requirements.txt').exists()
+    }
+    
+    return structure

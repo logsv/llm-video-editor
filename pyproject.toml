@@ -46,6 +46,7 @@ dependencies = [
     "numpy==1.26.4",
     "opencv-python==4.10.0.84",
     "Pillow==10.4.0",
+    "pytest-cov>=6.0.0",
 ]
 
 [project.optional-dependencies]
@@ -55,13 +56,14 @@ pro = [
     "demucs==4.0.1",       # Audio source separation for music ducking
     "librosa==0.10.2",     # Audio analysis and processing
     "soundfile==0.12.1",   # Audio file I/O
-    "yolox==0.3.0",        # ByteTrack for object tracking
+    # "yolox==0.3.0",        # ByteTrack for object tracking (optional, has build issues)
 ]
 
 # Development and testing
 dev = [
     "pytest==8.3.3",
     "pytest-asyncio==0.24.0",
+    "pytest-cov==6.0.0",
     "black==24.8.0",
     "flake8==7.1.1",
     "mypy==1.11.2",
@@ -102,11 +104,6 @@ dev-dependencies = [
 # uv workspace configuration
 [tool.uv.workspace]
 members = ["."]
-
-# Python version management
-[tool.uv.sources]
-# Use specific Python version for reproducibility
-python = "3.11"
 
 # Black formatter configuration
 [tool.black]
@@ -163,7 +160,7 @@ ignore_missing_imports = true
 # Pytest configuration
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q --strict-markers"
+addopts = "-ra -q --strict-markers --cov=llm_video_editor --cov-report=term-missing --cov-report=html"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
@@ -173,6 +170,7 @@ markers = [
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
 ]
+asyncio_default_fixture_loop_scope = "function"
 
 # Coverage configuration
 [tool.coverage.run]
