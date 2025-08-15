@@ -16,7 +16,7 @@ An intelligent, prompt-driven video router/editor that processes video content a
 
 ## 🎬 Workflow Demo
 
-![LLM Video Editor Workflow](https://github.com/user-attachments/assets/workflow-demo.gif)
+![LLM Video Editor Workflow](assets/workflow-demo.gif)
 
 *Complete workflow demonstration: from prompt input to rendered 5-second Instagram Reel with quality validation*
 
