@@ -72,13 +72,14 @@ from ..utils.file_utils import find_video_files, validate_input_path
 @click.option(
     '--use-ollama',
     is_flag=True,
+    default=True,
     help='Use local Ollama instead of OpenAI'
 )
 @click.option(
     '--ollama-model',
-    default='llama3.2',
+    default='llama3.2:latest',
     type=str,
-    help='Ollama model name (llama3.2, codellama, mistral, etc.)'
+    help='Ollama model name (llama3.2:latest, codellama, mistral, etc.)'
 )
 @click.option(
     '--ollama-url',

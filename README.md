@@ -86,14 +86,13 @@ results = renderer.render_edl(edl, "input.mp4", "output/")
 print(f"Final video: {results['final_video']}")
 ```
 
-**Conversational CLI:**
+**Interactive CLI:**
 ```bash
-# Start interactive CLI
-uv run llm-video-router --use-ollama --ollama-model gpt-oss:latest
+# Start interactive mode (prompts for inputs)
+uv run llm-video-router --interactive
 
-# Alternative: Start chat mode directly
-llm-video-router chat
-# Commands: add <path>, add-image <path>, edit, t2v, i2v, merge, list, quit
+# Or run without arguments for automatic interactive mode
+uv run llm-video-router
 ```
 
 **Command Line:**
@@ -164,29 +163,10 @@ Set `OPEN_SORA_CMD` to your local infer script, or `OPEN_SORA_HOST` to a running
 Install `diffusers`, `torch`, `accelerate`, accept the model license on Hugging Face.
 
 ```bash
-# Example usage in conversational CLI
-llm-video-router chat
-> t2v
-Prompt for b-roll (text→video): foggy city skyline timelapse, cinematic
-Seconds [4]: 6
-Resolution (e.g., 576x1024) [576x1024]: 
+# Example usage in interactive CLI
+uv run llm-video-router --interactive
+# Follow the prompts to input video file, editing prompt, and target platform
 ```
-
-### Conversational CLI
-
-```bash
-llm-video-router chat
-```
-
-Available commands:
-- `add <video_path>` - Add video asset to workspace
-- `add-image <image_path>` - Add image asset for I2V generation
-- `edit` - Edit video with natural language prompts
-- `t2v` - Generate text-to-video B-roll clips
-- `i2v` - Generate image-to-video B-roll clips  
-- `merge` - Combine multiple video assets
-- `list` - Show all assets in workspace
-- `quit` - Exit the interface
 
 ## 🔧 CLI Commands
 
@@ -195,32 +175,30 @@ Available commands:
 llm-video-router [OPTIONS]
 
 Options:
-  --in PATH              Input video file or directory [required]
-  --prompt TEXT          Editing prompt [required]
-  --target CHOICE        Target platform (youtube|reels|tiktok)
-  --out PATH             Output directory
-  --use-ollama           Use Ollama for local LLM inference
-  --ollama-model TEXT    Ollama model name (e.g., llama3.1, gpt-oss:latest)
-  --asr-model CHOICE     Whisper model size
-  --scene-threshold FLOAT Scene detection threshold
-  --language TEXT        Language code for ASR
-  --dry-run              Preview without processing
-  --config PATH          Configuration file
+  -i, --input PATH                Input video file or directory
+  -p, --prompt TEXT               Editing prompt describing what you want to create
+  -t, --target [youtube|reels|tiktok]  Target platform for the video
+  --interactive                   Run in interactive mode (prompts for inputs)
+  -o, --output PATH               Output directory for generated files
+  --asr-model [tiny|base|small|medium|large-v3]  Whisper model size for speech recognition
+  --scene-threshold FLOAT         Scene detection threshold (lower = more sensitive)
+  --language TEXT                 Language code for ASR (e.g., en, es, fr). Auto-detect if not specified
+  --planner-model TEXT            LLM model for planning (gpt-4, gpt-3.5-turbo, etc.)
+  --use-ollama                    Use local Ollama instead of OpenAI
+  --ollama-model TEXT             Ollama model name (llama3.2, codellama, mistral, etc.)
+  --ollama-url TEXT               Ollama server URL
+  --dry-run                       Show what would be done without actually processing
+  -v, --verbose                   Enable verbose output
+  --config PATH                   Configuration file path (JSON)
 ```
 
-### Utility Commands
+### Interactive Mode
 ```bash
-# Analyze video file
-llm-video-router info video.mp4
+# Start interactive mode - prompts for all inputs
+uv run llm-video-router --interactive
 
-# Detect scenes
-llm-video-router scenes video.mp4 --thumbnails
-
-# Transcribe audio
-llm-video-router transcribe video.mp4 --format srt
-
-# List platforms
-llm-video-router platforms
+# Or run without any arguments (automatically enters interactive mode)
+uv run llm-video-router
 ```
 
 ## 🐍 Programmatic Usage
