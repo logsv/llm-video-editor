@@ -88,6 +88,20 @@ class SceneDetector:
                 end_frame=int(end_seconds * 30)
             ))
         
+        # Ensure we have at least one scene - use entire video as single scene if no scenes detected
+        if not scenes:
+            print("No valid scenes detected after filtering, using entire video as single scene")
+            # Get video duration for fallback scene
+            from .media_probe import MediaProbe
+            media_info = MediaProbe.probe_file(video_path)
+            scenes.append(Scene(
+                start_time=0.0,
+                end_time=media_info.duration,
+                duration=media_info.duration,
+                start_frame=0,
+                end_frame=int(media_info.duration * 30)
+            ))
+        
         print(f"Detected {len(scenes)} scenes")
         return scenes
     

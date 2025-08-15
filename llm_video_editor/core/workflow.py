@@ -1,7 +1,7 @@
 """
 LangGraph workflow implementation for the video editing pipeline.
 """
-from typing import Dict, Any, List, Optional, TypedDict
+from typing import Dict, Any, List, Optional, TypedDict, Annotated
 from pathlib import Path
 import tempfile
 import os
@@ -14,6 +14,7 @@ from .asr import ASRProcessor, TranscriptSegment
 from .scene_detection import SceneDetector, Scene
 from .planner import VideoPlanner, EditDecisionList
 from .ollama_planner import OllamaVideoPlanner, create_ollama_planner
+from .renderer import VideoRenderer
 
 
 class VideoEditingState(TypedDict):
@@ -34,7 +35,7 @@ class VideoEditingState(TypedDict):
     
     # Status and metadata
     status: str
-    metadata: Dict[str, Any]
+    metadata: Dict[str, Any]  # Metadata and completion flags
 
 
 class VideoEditingWorkflow:
@@ -46,7 +47,8 @@ class VideoEditingWorkflow:
         scene_threshold: float = 27.0,
         planner_model: str = "gpt-4",
         use_ollama: bool = False,
-        ollama_base_url: str = "http://localhost:11434"
+        ollama_base_url: str = "http://localhost:11434",
+        enable_rendering: bool = True
     ):
         """
         Initialize workflow.
@@ -57,9 +59,11 @@ class VideoEditingWorkflow:
             planner_model: LLM model for planning (OpenAI) or Ollama model name
             use_ollama: Whether to use local Ollama instead of OpenAI
             ollama_base_url: Ollama server URL
+            enable_rendering: Whether to render the final video
         """
         self.asr_processor = ASRProcessor(model_size=asr_model)
         self.scene_detector = SceneDetector(threshold=scene_threshold)
+        self.enable_rendering = enable_rendering
         
         if use_ollama:
             self.planner = OllamaVideoPlanner(model_name=planner_model, base_url=ollama_base_url)
@@ -67,6 +71,15 @@ class VideoEditingWorkflow:
         else:
             self.planner = VideoPlanner(model_name=planner_model)
             print(f"Using OpenAI model: {planner_model}")
+        
+        # Initialize renderer if enabled
+        if self.enable_rendering:
+            self.renderer = VideoRenderer(
+                use_gpu=True,
+                enable_smart_reframing=False,  # Disable for now to avoid YOLO dependency
+                enable_music_ducking=False,    # Disable for now to avoid Demucs dependency  
+                enable_qc=True
+            )
         
         # Create workflow graph
         self.workflow = self._create_workflow()
@@ -79,18 +92,26 @@ class VideoEditingWorkflow:
         # Add nodes
         workflow.add_node("probe", self.probe_node)
         workflow.add_node("asr", self.asr_node)
-        workflow.add_node("scenes", self.scenes_node)
+        workflow.add_node("scene_detection", self.scenes_node)
         workflow.add_node("plan", self.planner_node)
         workflow.add_node("validate", self.validate_node)
         
-        # Add edges
+        # Add rendering node if enabled
+        if self.enable_rendering:
+            workflow.add_node("render", self.render_node)
+        
+        # Add edges - Sequential processing to avoid state conflicts
         workflow.set_entry_point("probe")
         workflow.add_edge("probe", "asr")
-        workflow.add_edge("probe", "scenes")  # Parallel processing
-        workflow.add_edge("asr", "plan")
-        workflow.add_edge("scenes", "plan")
+        workflow.add_edge("asr", "scene_detection")  # Sequential processing
+        workflow.add_edge("scene_detection", "plan")
         workflow.add_edge("plan", "validate")
-        workflow.add_edge("validate", END)
+        
+        if self.enable_rendering:
+            workflow.add_edge("validate", "render")
+            workflow.add_edge("render", END)
+        else:
+            workflow.add_edge("validate", END)
         
         return workflow
     
@@ -162,9 +183,10 @@ class VideoEditingWorkflow:
                 self.asr_processor.cleanup_temp_audio(temp_audio)
                 
         except Exception as e:
-            state["status"] = "error"
-            state["metadata"]["error"] = f"ASR failed: {str(e)}"
-            raise
+            state["metadata"]["asr_error"] = f"ASR failed: {str(e)}"
+            print(f"ASR error: {str(e)}")
+            # Don't set status to error - let the workflow continue
+            state["metadata"]["asr_complete"] = True  # Mark as complete even if failed
         
         return state
     
@@ -191,9 +213,10 @@ class VideoEditingWorkflow:
             print(f"Scene detection complete: {len(scenes)} scenes, exported to {scene_list_path}")
             
         except Exception as e:
-            state["status"] = "error"
-            state["metadata"]["error"] = f"Scene detection failed: {str(e)}"
-            raise
+            state["metadata"]["scenes_error"] = f"Scene detection failed: {str(e)}"
+            print(f"Scene detection error: {str(e)}")
+            # Don't set status to error - let the workflow continue
+            state["metadata"]["scenes_complete"] = True  # Mark as complete even if failed
         
         return state
     
@@ -205,30 +228,45 @@ class VideoEditingWorkflow:
                 print("Waiting for ASR and scene detection to complete...")
                 return state
             
+            # Check if there were errors in preprocessing
+            if state["metadata"].get("asr_error") and state["metadata"].get("scenes_error"):
+                print("Both ASR and scene detection failed, cannot continue planning")
+                state["status"] = "error"
+                state["metadata"]["error"] = "Both ASR and scene detection failed"
+                return state
+            
             print("Starting LLM planning...")
             
             user_prompt = state["inputs"]["prompt"]
             target_platform = state["inputs"].get("target", "youtube")
             
-            # Prepare data for planner
-            transcript_data = [
-                {
-                    "start": seg.start,
-                    "end": seg.end,
-                    "text": seg.text,
-                    "words": seg.words
-                }
-                for seg in state["transcript_segments"]
-            ]
+            # Prepare data for planner - handle missing data gracefully
+            transcript_data = []
+            if not state["metadata"].get("asr_error"):
+                transcript_data = [
+                    {
+                        "start": seg.start,
+                        "end": seg.end,
+                        "text": seg.text,
+                        "words": seg.words
+                    }
+                    for seg in state["transcript_segments"]
+                ]
+            else:
+                print("Warning: No transcript available, planning without speech data")
             
-            scene_data = [
-                {
-                    "start_time": scene.start_time,
-                    "end_time": scene.end_time,
-                    "duration": scene.duration
-                }
-                for scene in state["scenes"]
-            ]
+            scene_data = []
+            if not state["metadata"].get("scenes_error"):
+                scene_data = [
+                    {
+                        "start_time": scene.start_time,
+                        "end_time": scene.end_time,
+                        "duration": scene.duration
+                    }
+                    for scene in state["scenes"]
+                ]
+            else:
+                print("Warning: No scene data available, planning without scene boundaries")
             
             media_data = {
                 "filepath": state["media_info"].filepath,
@@ -335,6 +373,51 @@ class VideoEditingWorkflow:
         
         return state
     
+    def render_node(self, state: VideoEditingState) -> VideoEditingState:
+        """Render the final video using the EDL."""
+        try:
+            print("Starting video rendering...")
+            
+            edl = state["edl"]
+            media_info = state["media_info"]
+            output_dir = state["artifacts"]["output_dir"]
+            target_platform = state["inputs"].get("target", "youtube")
+            
+            # Generate output filename
+            input_path = Path(state["inputs"]["path"])
+            output_filename = f"{input_path.stem}_{target_platform}.mp4"
+            output_path = os.path.join(output_dir, output_filename)
+            
+            print(f"Rendering video to: {output_path}")
+            print(f"Using EDL with {len(edl.clips)} clips")
+            
+            # Render the video
+            render_results = self.renderer.render_edl(
+                edl=edl,
+                source_file=state["inputs"]["path"],
+                output_dir=output_dir
+            )
+            
+            # Update state with rendered video path
+            final_video = render_results.get("final_video")
+            if final_video:
+                state["artifacts"]["rendered_video"] = final_video
+                state["artifacts"]["clip_files"] = render_results.get("clips", [])
+                if render_results.get("subtitle_file"):
+                    state["artifacts"]["subtitle_file"] = render_results["subtitle_file"]
+                state["metadata"]["rendering_complete"] = True
+                print(f"✅ Video rendering completed: {final_video}")
+            else:
+                raise RuntimeError("No final video was generated by renderer")
+            
+        except Exception as e:
+            print(f"❌ Rendering failed: {str(e)}")
+            state["status"] = "error"
+            state["metadata"]["error"] = f"Rendering failed: {str(e)}"
+            # Don't raise - let the workflow continue for debugging
+        
+        return state
+    
     def run(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Run the complete video editing workflow.
@@ -396,7 +479,8 @@ def create_workflow(
     scene_threshold: float = 27.0,
     planner_model: str = "gpt-4",
     use_ollama: bool = False,
-    ollama_base_url: str = "http://localhost:11434"
+    ollama_base_url: str = "http://localhost:11434",
+    enable_rendering: bool = True
 ) -> VideoEditingWorkflow:
     """
     Factory function to create a video editing workflow.
@@ -407,6 +491,7 @@ def create_workflow(
         planner_model: LLM model for planning
         use_ollama: Whether to use local Ollama instead of OpenAI
         ollama_base_url: Ollama server URL
+        enable_rendering: Whether to render the final video
         
     Returns:
         VideoEditingWorkflow instance
@@ -416,5 +501,6 @@ def create_workflow(
         scene_threshold=scene_threshold,
         planner_model=planner_model,
         use_ollama=use_ollama,
-        ollama_base_url=ollama_base_url
+        ollama_base_url=ollama_base_url,
+        enable_rendering=enable_rendering
     )

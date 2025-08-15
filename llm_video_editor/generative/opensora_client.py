@@ -38,7 +38,38 @@ class OpenSoraClient:
             path = Path(r.json().get("path", str(outfile)))
             return path
         else:
-            raise RuntimeError("Set OPEN_SORA_CMD or OPEN_SORA_HOST to enable Open-Sora generation")
+            # Fallback: Create a simple test video for development
+            print("⚠️  No Open-Sora configured, creating test video...")
+            return self._create_test_video(prompt, seconds, fps, resolution, outfile)
+    
+    def _create_test_video(self, prompt: str, seconds: int, fps: int, resolution: str, outfile: Path) -> Path:
+        """Create a simple test video with text overlay for development."""
+        import subprocess
+        
+        # Parse resolution
+        width, height = map(int, resolution.split('x'))
+        
+        # Create a simple colored video with text
+        cmd = [
+            'ffmpeg', '-y',
+            '-f', 'lavfi',
+            '-i', f'color=c=0x1e3a8a:size={width}x{height}:duration={seconds}:rate={fps}',
+            '-vf', f'drawtext=text=\'{prompt[:50]}...\':fontcolor=white:fontsize=24:x=(w-text_w)/2:y=(h-text_h)/2',
+            '-c:v', 'libx264',
+            '-pix_fmt', 'yuv420p',
+            str(outfile)
+        ]
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"✅ Created test video: {outfile}")
+                return outfile
+            else:
+                print(f"❌ FFmpeg error: {result.stderr}")
+                raise RuntimeError(f"Failed to create test video: {result.stderr}")
+        except FileNotFoundError:
+            raise RuntimeError("FFmpeg not found. Please install FFmpeg to create test videos.")
 
     @staticmethod
     def _run(cmd: str):

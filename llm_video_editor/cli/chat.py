@@ -92,7 +92,8 @@ def chat():
             with Progress() as p:
                 t = p.add_task("Generating T2V", total=100)
                 out_edl = resolve_broll(edl, WORKDIR)
-                asset_path = out_edl["clips"][0 if out_edl["clips"][0].get("source") else 1]["source"]
+                # Find the generated clip (should be the second one after "after" insertion)
+                asset_path = out_edl["clips"][1]["source"] if len(out_edl["clips"]) > 1 else out_edl["clips"][0]["source"]
                 p.update(t, advance=100)
             aid = add_asset("video", Path(asset_path), {"src":"t2v"})
             console.print(f"[green]Done:[/green] {asset_path} (id {aid})")
