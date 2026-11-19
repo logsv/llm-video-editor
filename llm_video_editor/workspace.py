@@ -181,7 +181,12 @@ class Workspace:
         return d
 
     def rel(self, path: Path) -> str:
-        return str(Path(path).resolve().relative_to(self.root.resolve()))
+        """Path relative to the workspace root, or absolute if it lives elsewhere."""
+        resolved = Path(path).resolve()
+        try:
+            return str(resolved.relative_to(self.root.resolve()))
+        except ValueError:
+            return str(resolved)
 
     # -- checkpoint IO -----------------------------------------------
     @staticmethod

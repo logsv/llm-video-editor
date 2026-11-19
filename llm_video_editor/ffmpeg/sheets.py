@@ -65,7 +65,7 @@ def frame_times(start: float, end: float, fps: float) -> list[float]:
 def _filter(spec: SheetSpec, tw: int, th: int, with_text: bool) -> str:
     parts = [f"fps={spec.fps}", f"scale={tw}:{th}:flags=area", "setsar=1"]
     if with_text:
-        size = max(12, th // 9)
+        size = max(10, min(th // 9, tw // 8))
         parts.append(
             "drawtext=text='%{pts\\:hms}':x=4:y=4:fontsize="
             f"{size}:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=3"

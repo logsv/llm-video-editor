@@ -2,7 +2,6 @@
 Utility modules for video processing.
 """
 
-from .ffmpeg_utils import FFmpegProcessor
 from .file_utils import (
     find_video_files,
     is_video_file,
@@ -19,7 +18,6 @@ from .file_utils import (
 )
 
 __all__ = [
-    'FFmpegProcessor',
     'find_video_files',
     'is_video_file',
     'is_audio_file',

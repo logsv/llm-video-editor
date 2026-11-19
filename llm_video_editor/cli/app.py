@@ -115,5 +115,75 @@ def cut_audit_cmd(
         raise typer.Exit(1)
 
 
+ENCODER = typer.Option("auto", help="auto | h264_nvenc | h264_videotoolbox | libx264")
+
+
+@app.command("render")
+def render_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory printed by `watch`"),
+    out: Path | None = typer.Option(None, "--out", "-o", help="Output .mp4 path"),
+    encoder: str = ENCODER,
+    draft: bool = typer.Option(False, help="Fast low-quality encode"),
+    captions: bool = typer.Option(True, help="Burn captions from the transcript"),
+) -> None:
+    """Render edl_audited.json in one encode (two-pass -14 LUFS) and write qc_report.json."""
+    from ..stages.render import render
+
+    res = render(Workspace.load(workspace), out=out, encoder=encoder,
+                 quality="draft" if draft else "high", burn_captions=captions)
+    _print_qc(res.qc)
+    typer.echo(str(res.output))
+    if not res.qc.passed:
+        raise typer.Exit(1)
+
+
+def _print_qc(qc) -> None:
+    status = "[green]QC PASSED[/green]" if qc.passed else "[red]QC FAILED[/red]"
+    console.print(f"{status} {qc.width}x{qc.height}@{qc.fps:g} {qc.duration:.2f}s "
+                  f"A/V offset {qc.av_offset * 1000:.0f} ms, {qc.integrated_lufs} LUFS ({qc.encoder})")
+    for p in qc.problems:
+        console.print(f"  - {p}")
+
+
+@app.command("run")
+def run_cmd(
+    inputs: list[str] = typer.Argument(..., help="Video file(s), folder(s) or glob(s)"),
+    prompt: str = typer.Option(..., "--prompt", "-p"),
+    target: str = typer.Option("youtube", "--target", "-t"),
+    target_duration: str | None = typer.Option(None, help="e.g. 10m, 90s, 1:30"),
+    provider: str = PROVIDER,
+    model: str | None = typer.Option(None),
+    asr_model: str = typer.Option("distil-large-v3"),
+    language: str | None = typer.Option(None),
+    encoder: str = ENCODER,
+    draft: bool = typer.Option(False),
+    out: Path | None = typer.Option(None, "--out", "-o"),
+    home: Path | None = HOME,
+) -> None:
+    """watch -> plan -> cut-audit -> render, stopping if the cut audit fails."""
+    from ..llm import get_provider
+    from ..stages.asr import FasterWhisperTranscriber
+    from ..stages.cut_audit import run_cut_audit
+    from ..stages.durations import parse_duration
+    from ..stages.plan import plan
+    from ..stages.render import render
+    from ..stages.watch import watch as run_watch
+
+    ws = _open(inputs, home)
+    console.print(f"Workspace: {ws.root}")
+    run_watch(ws, transcriber=FasterWhisperTranscriber(asr_model), language=language)
+    dur = parse_duration(target_duration) if target_duration else None
+    plan(ws, prompt, get_provider(provider, model), target_platform=target, target_duration=dur)
+    _, report = run_cut_audit(ws)
+    if not report.passed:
+        for v in report.unresolved:
+            console.print(f"[red]{v.kind}[/red] {v.clip_id or ''} {v.message}")
+        console.print("Cut audit failed; fix edl_raw.json or re-plan, then run `llmve cut-audit`.")
+        raise typer.Exit(1)
+    res = render(ws, out=out, encoder=encoder, quality="draft" if draft else "high")
+    _print_qc(res.qc)
+    typer.echo(str(res.output))
+
+
 if __name__ == "__main__":
     app()

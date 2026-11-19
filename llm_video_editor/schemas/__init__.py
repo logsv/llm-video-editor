@@ -7,6 +7,7 @@ from .base import SCHEMA_VERSION, Checkpoint, Strict
 from .cut_audit import CutAudit, Violation
 from .edl import EDL, CaptionSettings, EDLClip, Overlay
 from .manifest import ClipInfo, ClipsManifest, SceneCut
+from .render import RenderQC
 from .sheets import Sheet, SheetIndex, Tile
 from .transcript import ClipTranscript, Segment, Transcript, Word
 
@@ -17,6 +18,7 @@ CHECKPOINTS: dict[str, type[Checkpoint]] = {
     "asset_plan": AssetPlan,
     "edl": EDL,
     "cut_audit": CutAudit,
+    "qc_report": RenderQC,
 }
 
 __all__ = [
@@ -34,6 +36,7 @@ __all__ = [
     "EDLClip",
     "Overlay",
     "PlannedSegment",
+    "RenderQC",
     "SceneCut",
     "Segment",
     "Sheet",

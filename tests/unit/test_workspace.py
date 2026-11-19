@@ -51,5 +51,8 @@ def test_workspace_cache_records(tmp_path):
     reopened = Workspace.load(ws.root)
     assert reopened.is_fresh("watch", key)
     assert not reopened.is_fresh("watch", ws.stage_key("watch", 2))
+    outside = _touch(tmp_path / "exports" / "final.mp4")
+    ws.record("render", "k", [outside])
+    assert ws.is_fresh("render", "k")
     ws.transcript.unlink()
     assert not Workspace.load(ws.root).is_fresh("watch", key)

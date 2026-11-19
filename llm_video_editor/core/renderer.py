@@ -1,5 +1,5 @@
 """
-Video rendering and cutting functionality for applying EDL operations.
+LEGACY renderer used by core/workflow.py. Superseded by stages/render.py; removed in Phase 7.
 """
 import os
 import subprocess
@@ -12,7 +12,7 @@ from .planner import EditDecisionList, EDLClip
 from .smart_reframing import SmartReframer, fallback_to_autoflip_style
 from .music_ducking import MusicDucker, DuckingProfile
 from .quality_control import QualityController
-from ..utils.ffmpeg_utils import FFmpegProcessor
+from ..ffmpeg.encoders import detect_encoder
 from ..presets.platform_presets import get_ffmpeg_preset, get_subtitle_style
 
 
@@ -40,7 +40,7 @@ class VideoRenderer:
             enable_music_ducking: Whether to enable music ducking with Demucs
             enable_qc: Whether to perform quality control checks
         """
-        self.use_gpu = use_gpu and FFmpegProcessor.check_gpu_acceleration()
+        self.use_gpu = use_gpu and detect_encoder() != "libx264"
         self.temp_files = []  # Track temporary files for cleanup
         
         # Initialize pro features

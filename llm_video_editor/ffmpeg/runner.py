@@ -24,6 +24,7 @@ def run(
     timeout: float | None = None,
     check: bool = True,
     input_text: str | None = None,
+    cwd: str | Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``argv`` (a list, never a shell string) and capture text output."""
     if isinstance(argv, str | bytes):
@@ -35,7 +36,7 @@ def run(
         raise FFmpegError(f"Executable not found on PATH: {args[0]}", args)
     try:
         proc = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout, input=input_text
+            args, capture_output=True, text=True, timeout=timeout, input=input_text, cwd=cwd
         )
     except subprocess.TimeoutExpired as e:
         raise FFmpegError(f"Timed out after {timeout}s: {args[0]}", args) from e
@@ -46,9 +47,11 @@ def run(
     return proc
 
 
-def ffmpeg(*args: str | Path, timeout: float | None = None, check: bool = True):
+def ffmpeg(*args: str | Path, timeout: float | None = None, check: bool = True,
+           cwd: str | Path | None = None):
     """``ffmpeg -hide_banner -nostdin -y <args>``."""
-    return run(["ffmpeg", "-hide_banner", "-nostdin", "-y", *args], timeout=timeout, check=check)
+    return run(["ffmpeg", "-hide_banner", "-nostdin", "-y", *args], timeout=timeout, check=check,
+               cwd=cwd)
 
 
 def ffprobe_json(path: str | Path, timeout: float = 60) -> dict:
