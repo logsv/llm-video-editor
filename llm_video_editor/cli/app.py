@@ -30,11 +30,22 @@ def schema(name: str = typer.Argument(..., help=f"One of: {', '.join(CHECKPOINTS
     typer.echo(json.dumps(CHECKPOINTS[name].model_json_schema(), indent=2))
 
 
+def _chunking(over_minutes: float | None, workers: int):
+    from ..stages.chunked_asr import ChunkConfig
+
+    if over_minutes is None:
+        return None
+    return ChunkConfig(min_duration=over_minutes * 60, workers=workers)
+
+
 @app.command()
 def watch(
     inputs: list[str] = typer.Argument(..., help="Video file(s), folder(s) or glob(s)"),
     asr_model: str = typer.Option("distil-large-v3", help="faster-whisper model"),
     language: str | None = typer.Option(None, help="Force ASR language (e.g. en)"),
+    chunk_asr_over: float | None = typer.Option(
+        None, help="Chunked/parallel ASR for clips longer than this many minutes (e.g. 10)"),
+    asr_workers: int = typer.Option(0, help="ASR worker processes for chunked ASR (0 = auto)"),
     home: Path | None = HOME,
 ) -> None:
     """Transcribe, score scenes, classify A-roll/B-roll and build overview sheets."""
@@ -42,7 +53,8 @@ def watch(
     from ..stages.watch import watch as run_watch
 
     ws = _open(inputs, home)
-    res = run_watch(ws, transcriber=FasterWhisperTranscriber(asr_model), language=language)
+    res = run_watch(ws, transcriber=FasterWhisperTranscriber(asr_model), language=language,
+                    chunking=_chunking(chunk_asr_over, asr_workers))
     table = Table(title=f"Workspace {ws.root}" + (" (cached)" if res.cached else ""))
     for col in ("clip_id", "kind", "duration", "size", "fps", "speech", "motion", "sheets"):
         table.add_column(col)
@@ -296,6 +308,9 @@ def run_cmd(
     model: str | None = typer.Option(None),
     asr_model: str = typer.Option("distil-large-v3"),
     language: str | None = typer.Option(None),
+    chunk_asr_over: float | None = typer.Option(
+        None, help="Chunked/parallel ASR for clips longer than this many minutes (e.g. 10)"),
+    asr_workers: int = typer.Option(0, help="ASR worker processes for chunked ASR (0 = auto)"),
     encoder: str = ENCODER,
     draft: bool = typer.Option(False),
     out: Path | None = typer.Option(None, "--out", "-o"),
@@ -315,7 +330,8 @@ def run_cmd(
 
     ws = _open(inputs, home)
     console.print(f"Workspace: {ws.root}")
-    run_watch(ws, transcriber=FasterWhisperTranscriber(asr_model), language=language)
+    run_watch(ws, transcriber=FasterWhisperTranscriber(asr_model), language=language,
+              chunking=_chunking(chunk_asr_over, asr_workers))
     dur = parse_duration(target_duration) if target_duration else None
     llm = get_provider(provider, model)
     plan(ws, prompt, llm, target_platform=target, target_duration=dur)

@@ -27,6 +27,7 @@ from ..schemas import (
 )
 from ..workspace import SourceFingerprint, Workspace
 from .asr import FasterWhisperTranscriber, Transcriber, extract_audio
+from .chunked_asr import ChunkConfig, transcribe_chunked
 
 OVERVIEW = SheetSpec(fps=0.5, cols=4, rows=4)
 DENSE = SheetSpec(fps=2.0, cols=4, rows=4)
@@ -56,10 +57,15 @@ def _sheet_models(ws: Workspace, clip_id: str, kind: str, spec: SheetSpec,
 
 
 def _transcribe_clip(ws: Workspace, fp: SourceFingerprint, info: ProbeResult,
-                     transcriber: Transcriber, language: str | None) -> ClipTranscript:
+                     transcriber: Transcriber, language: str | None,
+                     chunking: ChunkConfig | None = None) -> ClipTranscript:
     cdir = ws.clip_dir(fp.clip_id)
     cached = cdir / "transcript.json"
-    key = ws.stage_key("asr", fp.key, transcriber.name, language)
+    chunked = chunking is not None and info.has_audio and chunking.applies(info.duration)
+    parts: list = ["asr", fp.key, transcriber.name, language]
+    if chunked:  # only appended when used, so unchunked clips keep their existing cache
+        parts.append(chunking.cache_key())
+    key = ws.stage_key(*parts)
     if ws.is_fresh(f"asr:{fp.clip_id}", key):
         return Workspace.read(cached, ClipTranscript)
     lang, segments = None, []
@@ -67,7 +73,11 @@ def _transcribe_clip(ws: Workspace, fp: SourceFingerprint, info: ProbeResult,
         wav = cdir / "audio_16k.wav"
         try:
             extract_audio(fp.path, wav)
-            lang, segments = transcriber.transcribe(wav, language)
+            if chunked:
+                lang, segments = transcribe_chunked(transcriber, wav, language, chunking,
+                                                    cdir / "asr_chunks")
+            else:
+                lang, segments = transcriber.transcribe(wav, language)
         finally:
             wav.unlink(missing_ok=True)
     ct = ClipTranscript(clip_id=fp.clip_id, source_file=fp.path, language=lang,
@@ -85,11 +95,16 @@ def watch(
     overview: SheetSpec = OVERVIEW,
     scene_threshold: float = 0.3,
     workers: int = 4,
+    chunking: ChunkConfig | None = None,
 ) -> WatchResult:
+    """``chunking`` enables chunked/parallel ASR for clips >= ``chunking.min_duration``."""
     transcriber = transcriber or FasterWhisperTranscriber()
     fps = ws.fingerprints()
-    key = ws.stage_key("watch", [f.key for f in fps], transcriber.name, language,
-                       overview, scene_threshold)
+    parts: list = ["watch", [f.key for f in fps], transcriber.name, language,
+                   overview, scene_threshold]
+    if chunking is not None:
+        parts.append(chunking.cache_key())
+    key = ws.stage_key(*parts)
     if ws.is_fresh("watch", key):
         return WatchResult(
             Workspace.read(ws.clips_manifest, ClipsManifest),
@@ -111,7 +126,8 @@ def watch(
                 make_sheets, f.path, ws.sheets_dir, f"{f.clip_id}_overview",
                 src_size=(p.width, p.height), start=0.0, end=p.duration, spec=overview)
         transcripts = [
-            _transcribe_clip(ws, f, probes[f.clip_id], transcriber, language) for f in fps
+            _transcribe_clip(ws, f, probes[f.clip_id], transcriber, language, chunking)
+            for f in fps
         ]
         scenes = {cid: job.result() for cid, job in scene_jobs.items()}
         sheets = {cid: job.result() for cid, job in sheet_jobs.items()}

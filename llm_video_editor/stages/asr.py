@@ -37,18 +37,28 @@ class FasterWhisperTranscriber:
     def name(self) -> str:
         return f"faster-whisper:{self.model_name}"
 
+    def __getstate__(self):
+        # Picklable for process-pool workers (chunked ASR); each worker loads its own model.
+        return {**self.__dict__, "_model": None}
+
+    def resolved_device(self) -> str:
+        if self.device != "auto":
+            return self.device
+        try:
+            import ctranslate2
+
+            return "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+        except Exception:
+            return "cpu"
+
+    def uses_gpu(self) -> bool:
+        return self.resolved_device().startswith("cuda")
+
     def _load(self):
         if self._model is None:
             from faster_whisper import WhisperModel
 
-            device = self.device
-            if device == "auto":
-                try:
-                    import ctranslate2
-
-                    device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
-                except Exception:
-                    device = "cpu"
+            device = self.resolved_device()
             compute = self.compute_type
             if compute == "auto":
                 compute = "float16" if device == "cuda" else "int8"

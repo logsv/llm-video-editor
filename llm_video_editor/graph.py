@@ -18,6 +18,7 @@ from typing import Any, TypedDict
 
 from .llm import Provider, get_provider
 from .stages.asr import FasterWhisperTranscriber, Transcriber
+from .stages.chunked_asr import ChunkConfig
 from .stages.detectors import Detector, get_detector
 from .workspace import Workspace
 
@@ -48,6 +49,7 @@ class Deps:
     quality: str = "high"
     home: Path | None = None
     language: str | None = None
+    asr_chunking: ChunkConfig | None = None  # chunked/parallel ASR for long clips
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -74,7 +76,7 @@ def build_graph(deps: Deps | None = None, checkpointer=None):
         inputs = state["inputs"]
         ws = Workspace.open(inputs if len(inputs) > 1 else inputs[0], home=deps.home)
         watch(ws, transcriber=deps.transcriber or FasterWhisperTranscriber(),
-              language=deps.language)
+              language=deps.language, chunking=deps.asr_chunking)
         return {"workspace": str(ws.root), "status": "watched"}
 
     def plan_node(state: EditState) -> EditState:

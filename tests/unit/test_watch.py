@@ -54,3 +54,45 @@ def test_watch_window_appends_dense_sheet(media_dir, tmp_path):
     assert any(s.kind == "dense" for s in idx.sheets)
     watch_window(ws, cid, 1.0, 3.0)  # idempotent
     assert sum(s.kind == "dense" for s in Workspace.read(ws.sheets_index, SheetIndex).sheets) == 1
+
+
+@requires_ffmpeg
+def test_watch_chunked_asr_matches_unchunked_and_caches(media_dir, tmp_path):
+    from llm_video_editor.stages.chunked_asr import ChunkConfig
+    from tests.fakes import TimelineTranscriber, words_for
+
+    truth = words_for(" ".join(f"w{i}" for i in range(12)), 0.15)  # 0.15 .. 3.75 s
+    cfg = ChunkConfig(min_duration=2.0, chunk_seconds=1.5, overlap=0.6, search_window=0.2,
+                      workers=1)
+    ws = Workspace.open(media_dir / "a_talk_1080p30.mp4", home=tmp_path)
+    asr = TimelineTranscriber(truth)
+    res = watch(ws, transcriber=asr, chunking=cfg)
+    assert len(asr.calls) == 3 and all(p.name.startswith("chunk_") for p in asr.calls)
+    ct = res.transcript.clips[0]
+    assert [s.id for s in ct.segments] == list(range(len(ct.segments)))
+    assert [(w.text, w.start, w.end) for w in ct.words()] == [
+        (w.text, w.start, w.end) for w in truth]
+    Workspace.read(ws.transcript, Transcript)  # schema unchanged
+    assert not list(ws.clip_dir(ct.clip_id).glob("asr_chunks*"))
+
+    # cached: same settings -> no new ASR calls, even with a different worker count
+    watch(ws, transcriber=asr, chunking=ChunkConfig(**{**cfg.__dict__, "workers": 2}))
+    assert len(asr.calls) == 3
+    # chunking settings are part of the key -> re-transcribe
+    watch(ws, transcriber=asr, chunking=ChunkConfig(**{**cfg.__dict__, "overlap": 0.4}))
+    assert len(asr.calls) == 6
+    # same words with chunking off (one call over the whole clip)
+    plain = watch(ws, transcriber=asr)
+    assert len(asr.calls) == 7
+    assert [w.text for w in plain.transcript.clips[0].words()] == [w.text for w in truth]
+
+
+@requires_ffmpeg
+def test_watch_short_clip_not_chunked_keeps_cache_key(media_dir, tmp_path):
+    from llm_video_editor.stages.chunked_asr import ChunkConfig
+
+    ws = Workspace.open(media_dir / "a_talk_1080p30.mp4", home=tmp_path)
+    asr = FakeTranscriber()
+    watch(ws, transcriber=asr)
+    watch(ws, transcriber=asr, chunking=ChunkConfig())  # 4 s clip < 10 min threshold
+    assert len(asr.calls) == 1  # per-clip ASR cache reused; whole file, not chunks
