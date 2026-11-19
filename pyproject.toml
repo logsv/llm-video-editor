@@ -78,6 +78,7 @@ dev = [
 all = ["llm-video-editor[vision,pro,gen,anthropic,openai,legacy]"]
 
 [project.scripts]
+llmve = "llm_video_editor.cli.app:app"
 llm-video-router = "llm_video_editor.cli:main"
 llm-video-editor = "llm_video_editor.cli:main"
 
@@ -111,6 +112,9 @@ extend-exclude = [
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 # Pytest configuration
 [tool.pytest.ini_options]

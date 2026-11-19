@@ -1,4 +1,15 @@
-# Import main function from main module
-from .main import main
+"""Command-line entry points.
 
-__all__ = ['main']
+``llmve`` (``cli.app``) is the stage-based CLI. ``main`` is the legacy
+single-command router, imported lazily so the core install does not need the
+``legacy`` extra.
+"""
+
+
+def main() -> None:
+    from .main import main as legacy_main
+
+    legacy_main()
+
+
+__all__ = ["main"]
