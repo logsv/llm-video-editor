@@ -156,6 +156,10 @@ class Workspace:
         return self.root / "edl_audited.json"
 
     @property
+    def broll_select(self) -> Path:
+        return self.root / "broll_select.json"
+
+    @property
     def geometry_map(self) -> Path:
         return self.root / "geometry_map.json"
 

@@ -76,7 +76,8 @@ def _snap(clip: EDLClip, words: list[Word], duration: float, cfg: AuditConfig,
     if not ends_sentence(words[last_i]):
         has_punct = any(ends_sentence(w) for w in words)
         fwd = next((j for j in range(last_i + 1, len(words))
-                    if words[j].end - e <= cfg.max_extend and ends_sentence(words[j])), None)
+                    if words[j].end - e <= cfg.max_extend and words[j].end <= duration
+                    and ends_sentence(words[j])), None)
         if fwd is not None and words[fwd].end - e <= cfg.max_extend:
             rec.add("mid_sentence_out", clip, f"cut ends mid-sentence after {words[last_i].text!r}",
                     at=e, fixed=True, fix=f"extended to sentence end {words[fwd].end:.3f}s")

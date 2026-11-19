@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .asset_plan import AssetPlan, BrollPlacement, PlannedSegment
 from .base import SCHEMA_VERSION, Checkpoint, Strict
+from .broll import BrollIndex, BrollItem, BrollSelection, Candidate, SlotChoice
 from .cut_audit import CutAudit, Violation
 from .edl import EDL, CaptionSettings, EDLClip, Overlay
 from .geometry import ClipGeometry, ClipPlacement, Detection, GeometryMap, SceneGeometry
@@ -23,6 +24,8 @@ CHECKPOINTS: dict[str, type[Checkpoint]] = {
     "qc_report": RenderQC,
     "geometry_map": GeometryMap,
     "review": Review,
+    "broll_index": BrollIndex,
+    "broll_select": BrollSelection,
 }
 
 __all__ = [
@@ -30,7 +33,11 @@ __all__ = [
     "EDL",
     "SCHEMA_VERSION",
     "AssetPlan",
+    "BrollIndex",
+    "BrollItem",
     "BrollPlacement",
+    "BrollSelection",
+    "Candidate",
     "CaptionSettings",
     "Checkpoint",
     "ClipGeometry",
@@ -51,6 +58,7 @@ __all__ = [
     "SceneGeometry",
     "Segment",
     "Sheet",
+    "SlotChoice",
     "SheetIndex",
     "Strict",
     "Tile",

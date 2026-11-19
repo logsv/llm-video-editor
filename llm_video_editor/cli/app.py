@@ -115,6 +115,77 @@ def cut_audit_cmd(
         raise typer.Exit(1)
 
 
+broll_app = typer.Typer(help="Local B-roll library: index, describe, match.",
+                        no_args_is_help=True)
+app.add_typer(broll_app, name="broll")
+
+
+@broll_app.command("index")
+def broll_index_cmd(
+    library: Path = typer.Argument(..., help="B-roll folder"),
+    rescan: bool = typer.Option(False, help="Re-probe every file"),
+    sheets: bool = typer.Option(True, help="Write labelled thumbnail sheets"),
+) -> None:
+    """Incrementally index a B-roll folder -> .llmve_broll_index.json + broll_index.md."""
+    from ..stages.broll import MD_NAME, index_library, thumbnail_sheets
+
+    index, scanned = index_library(library, rescan=rescan)
+    console.print(f"{len(index.items)} clips indexed ({scanned} scanned): {library / MD_NAME}")
+    if sheets:
+        for p in thumbnail_sheets(library):
+            typer.echo(str(p))
+
+
+@broll_app.command("describe")
+def broll_describe_cmd(
+    library: Path = typer.Argument(...),
+    item_id: str = typer.Argument(...),
+    description: str = typer.Argument(..., help="What the clip shows"),
+    tags: str = typer.Option("", help="Comma-separated tags"),
+) -> None:
+    """Set a manual description (kept across rescans)."""
+    from ..stages.broll import describe
+
+    t = [x.strip() for x in tags.split(",") if x.strip()] or None
+    item = describe(library, item_id, description, t)
+    console.print(f"{item.item_id}: {item.description} [{', '.join(item.tags)}]")
+
+
+@broll_app.command("match")
+def broll_match_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory"),
+    library: Path | None = typer.Option(None, "--library", "-l", help="Indexed B-roll folder"),
+    provider: str | None = typer.Option(None, help="Re-rank top candidates with an LLM"),
+    model: str | None = typer.Option(None),
+    generate_missing: bool = typer.Option(False, help="Generate B-roll for empty slots (gen extra)"),
+) -> None:
+    """Fill B-roll slots in asset_plan.json from the library; rebuilds edl_raw.json."""
+    from ..stages.broll import match_broll
+
+    sel = match_broll(Workspace.load(workspace), library,
+                      provider=_provider(provider, model) if provider else None,
+                      generator=_generator(workspace) if generate_missing else None)
+    for s in sel.slots:
+        console.print(f"slot {s.slot}: {s.chosen or '-'} ({s.reason}) <- {s.query[:60]!r}")
+
+
+def _provider(name: str, model: str | None):
+    from ..llm import get_provider
+
+    return get_provider(name, model)
+
+
+def _generator(workspace: Path):
+    def gen(query: str, seconds: float, orientation: str) -> Path:
+        from ..generative.broll import BrollGenerator, BrollRequest
+
+        res = "576x1024" if orientation == "portrait" else "1024x576"
+        return BrollGenerator(workspace / "generated").generate(
+            BrollRequest(mode="t2v", prompt=query, seconds=max(2, round(seconds)), resolution=res))
+
+    return gen
+
+
 @app.command("geometry")
 def geometry_cmd(
     workspace: Path = typer.Argument(..., help="Workspace directory printed by `watch`"),
@@ -229,10 +300,11 @@ def run_cmd(
     draft: bool = typer.Option(False),
     out: Path | None = typer.Option(None, "--out", "-o"),
     detector: str = typer.Option("auto", help="auto | mediapipe | yolo | none"),
+    broll_library: Path | None = typer.Option(None, help="Indexed B-roll folder to match from"),
     approve: bool = typer.Option(False, "--approve", help="Approve the review sheet and render"),
     home: Path | None = HOME,
 ) -> None:
-    """watch -> plan -> cut-audit -> geometry -> review [-> render with --approve]."""
+    """watch -> plan -> b-roll -> cut-audit -> geometry -> review [-> render with --approve]."""
     from ..llm import get_provider
     from ..stages.asr import FasterWhisperTranscriber
     from ..stages.cut_audit import run_cut_audit
@@ -245,7 +317,13 @@ def run_cmd(
     console.print(f"Workspace: {ws.root}")
     run_watch(ws, transcriber=FasterWhisperTranscriber(asr_model), language=language)
     dur = parse_duration(target_duration) if target_duration else None
-    plan(ws, prompt, get_provider(provider, model), target_platform=target, target_duration=dur)
+    llm = get_provider(provider, model)
+    plan(ws, prompt, llm, target_platform=target, target_duration=dur)
+    from ..stages.broll import index_library, match_broll
+
+    if broll_library is not None:
+        index_library(broll_library)
+    match_broll(ws, broll_library, provider=llm if broll_library else None)
     _, report = run_cut_audit(ws)
     if not report.passed:
         for v in report.unresolved:
