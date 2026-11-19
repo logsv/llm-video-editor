@@ -23,7 +23,7 @@ under `.llmve/<batch_hash>/`. The batch hash comes from the sorted
 
 | Stage | Command | Writes | Notes |
 |---|---|---|---|
-| watch | `llmve watch <inputs>` | `transcript.json`, `clips_manifest.json`, `sheets/` | word-level faster-whisper (`--chunk-asr-over 10` splits clips over 10 min into ~5 min silence-aligned chunks, merged by timestamp; `--asr-workers N` runs them in parallel); scene/motion scores; clips with no speech tagged as B-roll; 4x4 contact sheets (0.5 FPS overview, 2 FPS on request via `watch-window`) |
+| watch | `llmve watch <inputs>` | `transcript.json`, `clips_manifest.json`, `sheets/` | word-level faster-whisper (optionally chunked and parallel for long clips, see below); scene/motion scores; clips with no speech tagged as B-roll; 4x4 contact sheets (0.5 FPS overview, 2 FPS on request via `watch-window`) |
 | plan | `llmve plan <ws> -p ...` | `asset_plan.json`, `edl_raw.json` | map/reduce over the whole transcript; the LLM picks **segment ids**, never timestamps; only text leaves the machine |
 | b-roll-select | `llmve broll index/describe/match` | `broll_select.json` | persistent `broll_index.md` in your B-roll folder, incremental rescans, BM25 + optional LLM re-rank |
 | cut-audit | `llmve cut-audit <ws>` | `cut_audit.json`, `edl_audited.json` | deterministic: word-edge snapping, sentence completion, per-clip clamping, overlaps, duration budget |
@@ -40,6 +40,34 @@ codecs, phone rotation) are normalised per segment before the concat. Clips
 without speech become B-roll candidates the planner can cut away to. Edits
 with more than 24 cuts render in groups to near-lossless intermediate files
 first, so memory stays bounded.
+
+### Long recordings (chunked, parallel ASR)
+By default every clip is transcribed in one pass. For long clips, turn on
+chunking:
+
+```bash
+uv run llmve watch ./raw_clips/ --chunk-asr-over 10 --asr-workers 4
+uv run llmve run ./raw_clips/ -p "..." --chunk-asr-over 10   # same flags on `run`
+```
+
+Clips longer than `--chunk-asr-over` minutes have their 16 kHz audio split
+into chunks of about 5 minutes with 2 s of overlap. Each cut goes in the middle
+of a pause found by ffmpeg `silencedetect` (within ±30 s of the nominal
+boundary), or at the fixed point when there is no pause. Chunks run in a
+process pool with one model per worker. `--asr-workers 0` (the default) means
+1 worker on GPU and up to 4 on CPU.
+
+Chunks are merged by timestamp, not by text: each word belongs to the chunk
+whose interior holds its midpoint, and words that both chunks transcribed in
+the overlap are kept once. Segment ids are re-numbered per clip, so
+`transcript.json` looks the same as an unchunked run. Chunk settings (but not
+the worker count) are part of the per-clip ASR cache key; clips below the
+threshold keep their existing cache.
+
+From Python, pass `chunking=ChunkConfig(...)` (`llm_video_editor.stages.chunked_asr`)
+to `watch()`, or set `Deps(asr_chunking=ChunkConfig(...))` for the LangGraph
+graph. `ChunkConfig` also exposes the chunk length, overlap, search window and
+silence threshold.
 
 ## Install
 
