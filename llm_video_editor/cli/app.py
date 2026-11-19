@@ -72,5 +72,48 @@ def watch_window_cmd(
         typer.echo(f"{workspace / s.path}\t{s.start:.2f}-{s.end:.2f}s\t~{s.est_tokens} tokens")
 
 
+PROVIDER = typer.Option("claude-cli", help="Planner: claude-cli | ollama | anthropic | openai")
+
+
+@app.command("plan")
+def plan_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory printed by `watch`"),
+    prompt: str = typer.Option(..., "--prompt", "-p", help="What the edit should be"),
+    target: str = typer.Option("youtube", "--target", "-t", help="youtube | reels | tiktok ..."),
+    target_duration: str | None = typer.Option(None, help="e.g. 10m, 90s, 1:30"),
+    provider: str = PROVIDER,
+    model: str | None = typer.Option(None, help="Provider-specific model name"),
+) -> None:
+    """Map/reduce planning -> asset_plan.json + edl_raw.json (text only leaves the machine)."""
+    from ..llm import get_provider
+    from ..stages.durations import parse_duration
+    from ..stages.plan import plan
+
+    dur = parse_duration(target_duration) if target_duration else None
+    asset_plan, edl = plan(Workspace.load(workspace), prompt, get_provider(provider, model),
+                           target_platform=target, target_duration=dur)
+    console.print(f"{len(edl.clips)} clips, {edl.total_duration:.1f}s of {asset_plan.target_duration:.1f}s "
+                  f"target, {len(edl.overlays)} B-roll overlays")
+    if asset_plan.notes:
+        console.print(f"[yellow]notes:[/yellow] {asset_plan.notes}")
+
+
+@app.command("cut-audit")
+def cut_audit_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory printed by `watch`"),
+) -> None:
+    """Snap cuts to words/sentences, clamp, merge, enforce budget -> edl_audited.json."""
+    from ..stages.cut_audit import run_cut_audit
+
+    edl, report = run_cut_audit(Workspace.load(workspace))
+    for v in report.violations:
+        mark = "fixed" if v.fixed else v.severity.upper()
+        console.print(f"[{mark}] {v.kind} {v.clip_id or ''} {v.message}" + (f" -> {v.fix}" if v.fix else ""))
+    console.print(f"{'PASSED' if report.passed else 'FAILED'}: {report.clips_after} clips, "
+                  f"{report.duration_after:.1f}s")
+    if not report.passed:
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

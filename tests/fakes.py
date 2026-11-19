@@ -40,3 +40,17 @@ class FakeTranscriber:
     def transcribe(self, audio_path, language):
         self.calls.append(Path(audio_path))
         return ("en", [] if self.silent else make_segments(self.script))
+
+
+class FakeProvider:
+    """Planner provider double: ``responder(schema, prompt) -> model``."""
+
+    name = "fake-llm"
+
+    def __init__(self, responder):
+        self.responder = responder
+        self.prompts: list[tuple[str, str, type]] = []
+
+    def complete(self, system, prompt, schema):
+        self.prompts.append((system, prompt, schema))
+        return self.responder(schema, prompt)

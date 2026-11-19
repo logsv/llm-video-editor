@@ -31,7 +31,8 @@ class Overlay(Strict):
     source_clip_id: str
     source_file: str
     src_start: float = 0.0
-    at: float  # output-timeline seconds
+    anchor_clip_id: str  # EDLClip.clip_id the overlay sits on
+    offset: float = 0.0  # seconds after the anchor clip starts in the output
     duration: float
     zone: Literal["full", "pip"] = "full"
 
@@ -65,3 +66,10 @@ class EDL(Checkpoint):
             starts.append(t)
             t += c.duration
         return starts
+
+    def overlay_start(self, overlay: Overlay) -> float | None:
+        """Output-timeline start of an overlay, or None if its anchor is gone."""
+        for clip, start in zip(self.clips, self.output_starts(), strict=True):
+            if clip.clip_id == overlay.anchor_clip_id:
+                return start + overlay.offset
+        return None
