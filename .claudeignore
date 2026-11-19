@@ -1,0 +1,16 @@
+# Raw media is never read by Claude sessions directly. Agents work from the
+# JSON checkpoints and contact sheets (sheets/*.png) under .llmve/ instead.
+# NOTE: Claude Code enforces this through the Read() deny rules in
+# .claude/settings.json; this file documents the same boundary for other tools.
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.m4v
+*.webm
+*.mxf
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
