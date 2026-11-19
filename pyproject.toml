@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-video-editor"
-version = "0.2.0"
-description = "Intelligent, prompt-driven video router/editor with LLM-based planning and pro polish features"
+version = "0.3.0"
+description = "Checkpointed, prompt-driven video editor: watch, plan, cut-audit, geometry, review, render"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -60,27 +60,20 @@ gen = [
 # Secondary planner providers (the default `claude-cli` provider needs no Python SDK).
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.40"]
-# Legacy CLI (`llm_video_editor/cli/main.py`, `core/workflow.py`) until it is removed.
-legacy = [
-    "click>=8.1.7",
-    "tqdm>=4.66",
-    "langgraph>=0.2.34",
-    "langchain-openai>=0.2.1",
-    "scenedetect>=0.6.4",
-    "opencv-python-headless>=4.10",
-    "numpy>=1.26",
-]
+# LangGraph orchestration with a human-in-the-loop interrupt at the review gate.
+graph = ["langgraph>=0.2.34"]
 dev = [
+    "langgraph>=0.2.34",
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "ruff>=0.6",
 ]
-all = ["llm-video-editor[vision,pro,gen,anthropic,openai,legacy]"]
+all = ["llm-video-editor[vision,pro,gen,anthropic,openai,graph]"]
 
 [project.scripts]
 llmve = "llm_video_editor.cli.app:app"
-llm-video-router = "llm_video_editor.cli:main"
-llm-video-editor = "llm_video_editor.cli:main"
+llm-video-router = "llm_video_editor.cli.app:app"
+llm-video-editor = "llm_video_editor.cli.app:app"
 
 [project.urls]
 Repository = "https://github.com/logsv/llm-video-editor"
@@ -97,16 +90,10 @@ llm_video_editor = ["py.typed"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-# Legacy modules scheduled for removal in Phase 7 of the refactor are not linted.
+# Optional/legacy-style modules kept as-is (generative B-roll clients, music ducking).
 extend-exclude = [
-    "llm_video_editor/cli/main.py",
-    "llm_video_editor/cli/chat.py",
-    "llm_video_editor/cli/clarifier.py",
-    "llm_video_editor/core",
     "llm_video_editor/generative",
-    "llm_video_editor/utils",
-    "llm_video_editor/presets",
-    "examples",
+    "llm_video_editor/audio/music_ducking.py",
 ]
 
 [tool.ruff.lint]

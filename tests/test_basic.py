@@ -1,8 +1,6 @@
 """
 Basic tests for LLM Video Editor components.
 """
-import json
-from pathlib import Path
 
 import pytest
 
@@ -91,55 +89,17 @@ class TestFileUtils:
         assert get_safe_filename("normal_name.mp4") == "normal_name.mp4"
 
 
-class TestWorkflowComponents:
-    """Test workflow component initialization."""
+class TestPipelineModules:
+    """The stage pipeline and CLI import without optional extras."""
 
-    def test_import_core_modules(self):
-        """Test that legacy core modules can be imported (needs the `legacy` extra)."""
-        pytest.importorskip("scenedetect")
-        pytest.importorskip("langchain_openai")
-        from llm_video_editor.core.asr import ASRProcessor
-        from llm_video_editor.core.scene_detection import SceneDetector
-        from llm_video_editor.core.workflow import create_workflow
+    def test_stage_modules_import(self):
+        from llm_video_editor.cli.app import app
+        from llm_video_editor.stages import broll, cut_audit, geometry, plan, render, review, watch
 
-        # Test that classes can be instantiated
-        asr = ASRProcessor(model_size="tiny")
-        assert asr.model_size == "tiny"
+        assert all(m is not None for m in (broll, cut_audit, geometry, plan, render, review, watch))
+        names = {c.name or c.callback.__name__ for c in app.registered_commands}
+        assert {"watch", "plan", "cut-audit", "geometry", "render", "run"} <= names
 
-        detector = SceneDetector(threshold=30.0)
-        assert detector.threshold == 30.0
-
-        # Test workflow creation (skip if no OpenAI API key)
-        try:
-            workflow = create_workflow(asr_model="tiny")
-            assert workflow is not None
-        except Exception as e:
-            # Expected when no API key is available
-            if "api_key" in str(e).lower():
-                print("Skipping workflow test - no OpenAI API key available")
-            else:
-                raise e
-
-
-class TestConfigValidation:
-    """Test configuration validation."""
-
-    def test_valid_config_structure(self):
-        """Test that example config has valid structure."""
-        config_path = Path(__file__).parent.parent / "examples" / "config.json"
-
-        if config_path.exists():
-            with open(config_path) as f:
-                config = json.load(f)
-
-            # Check required sections
-            assert "asr_model" in config
-            assert "scene_threshold" in config
-            assert "platforms" in config
-
-            # Check platform configs
-            assert "youtube" in config["platforms"]
-            assert "reels" in config["platforms"]
 
 
 if __name__ == "__main__":
