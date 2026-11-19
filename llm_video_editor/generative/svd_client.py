@@ -38,8 +38,11 @@ class SVDClient:
             tdp = Path(td)
             for i, frame in enumerate(frames):
                 frame.save(tdp / f"f_{i:05d}.png")
-            cmd = f"ffmpeg -y -framerate {fps} -i {tdp}/f_%05d.png -c:v libx264 -pix_fmt yuv420p {outfile}"
-            proc = subprocess.run(cmd, shell=True)
+            cmd = [
+                "ffmpeg", "-y", "-framerate", str(fps), "-i", str(tdp / "f_%05d.png"),
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", str(outfile),
+            ]
+            proc = subprocess.run(cmd)
             if proc.returncode != 0:
                 raise RuntimeError("ffmpeg failed for SVD output")
 

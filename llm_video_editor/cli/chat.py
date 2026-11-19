@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, shlex, uuid
+import json, os, uuid
 from pathlib import Path
 import typer
 from rich.console import Console
@@ -180,12 +180,14 @@ def concat(paths, out):
     normalized = []
     for p in paths:
         np = tmp / f"norm_{uuid.uuid4().hex[:6]}.mp4"
-        subprocess.run(f"ffmpeg -y -i {shlex.quote(p)} -r 30 -s 1080x1920 -c:v libx264 -pix_fmt yuv420p -c:a aac {shlex.quote(str(np))}", shell=True, check=True)
+        subprocess.run(["ffmpeg", "-y", "-i", str(p), "-r", "30", "-s", "1080x1920", "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p", "-c:a", "aac", str(np)], check=True)
         normalized.append(np)
     listfile = tmp / "concat.txt"
     with open(listfile, "w") as f:
         for n in normalized: f.write(f"file '{n}'\n")
-    subprocess.run(f"ffmpeg -y -f concat -safe 0 -i {shlex.quote(str(listfile))} -c copy {shlex.quote(str(out))}", shell=True, check=True)
+    subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(listfile),
+                    "-c", "copy", str(out)], check=True)
 
 if __name__ == "__main__":
     app()
