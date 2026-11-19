@@ -160,8 +160,8 @@ class Workspace:
         return self.root / "geometry_map.json"
 
     @property
-    def review_sheet(self) -> Path:
-        return self.root / "review_sheet.png"
+    def review_dir(self) -> Path:
+        return self.root / "review"
 
     @property
     def review(self) -> Path:

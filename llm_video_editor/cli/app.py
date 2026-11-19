@@ -115,6 +115,69 @@ def cut_audit_cmd(
         raise typer.Exit(1)
 
 
+@app.command("geometry")
+def geometry_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory printed by `watch`"),
+    detector: str = typer.Option("auto", help="auto | mediapipe | yolo | none"),
+    samples: int = typer.Option(3, help="Keyframes analysed per used scene"),
+) -> None:
+    """Face/subject boxes per used scene -> crop centres and caption/PiP safe zones."""
+    from ..stages.detectors import get_detector
+    from ..stages.geometry import run_geometry
+
+    det = get_detector(detector)
+    try:
+        gmap = run_geometry(Workspace.load(workspace), detector=det, samples=samples)
+    finally:
+        det.close()
+    console.print(f"detector: {gmap.detector}")
+    for p in gmap.placements:
+        console.print(f"{p.clip_id}: crop {p.crop_center}, subject {p.subject_box_out}, "
+                      f"captions {p.caption_position}, PiP {p.pip_corner}")
+
+
+review_app = typer.Typer(help="Pre-render review gate.", invoke_without_command=True)
+app.add_typer(review_app, name="review")
+
+
+@review_app.callback()
+def review_cmd(
+    ctx: typer.Context,
+    workspace: Path | None = typer.Argument(None, help="Workspace directory"),
+) -> None:
+    """Build the review contact sheet for the current cut (status: pending)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if workspace is None:
+        raise typer.BadParameter("workspace is required")
+    from ..stages.review import build_review
+
+    ws = Workspace.load(workspace)
+    review = build_review(ws)
+    for sheet in review.sheets:
+        typer.echo(str(ws.root / sheet))
+    for w in review.warnings:
+        console.print(f"[yellow]warning:[/yellow] {w}")
+    console.print("Look at the sheet(s), then `llmve review approve <workspace>` "
+                  "or `llmve review reject <workspace> --notes ...`.")
+
+
+@review_app.command("approve")
+def review_approve(workspace: Path, notes: str = typer.Option("", help="Reviewer notes")) -> None:
+    """Approve the current review so `render` may run."""
+    from ..stages.review import decide
+
+    console.print(f"review {decide(Workspace.load(workspace), True, notes).status}")
+
+
+@review_app.command("reject")
+def review_reject(workspace: Path, notes: str = typer.Option("", help="What to change")) -> None:
+    """Reject the current review; re-plan or edit, then review again."""
+    from ..stages.review import decide
+
+    console.print(f"review {decide(Workspace.load(workspace), False, notes).status}")
+
+
 ENCODER = typer.Option("auto", help="auto | h264_nvenc | h264_videotoolbox | libx264")
 
 
@@ -125,12 +188,19 @@ def render_cmd(
     encoder: str = ENCODER,
     draft: bool = typer.Option(False, help="Fast low-quality encode"),
     captions: bool = typer.Option(True, help="Burn captions from the transcript"),
+    skip_review: bool = typer.Option(False, help="Render without an approved review"),
 ) -> None:
-    """Render edl_audited.json in one encode (two-pass -14 LUFS) and write qc_report.json."""
+    """Render the approved cut in one encode (two-pass -14 LUFS) and write qc_report.json."""
     from ..stages.render import render
+    from ..stages.review import ReviewRequired
 
-    res = render(Workspace.load(workspace), out=out, encoder=encoder,
-                 quality="draft" if draft else "high", burn_captions=captions)
+    try:
+        res = render(Workspace.load(workspace), out=out, encoder=encoder,
+                     quality="draft" if draft else "high", burn_captions=captions,
+                     require_review=not skip_review)
+    except ReviewRequired as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2) from e
     _print_qc(res.qc)
     typer.echo(str(res.output))
     if not res.qc.passed:
@@ -158,9 +228,11 @@ def run_cmd(
     encoder: str = ENCODER,
     draft: bool = typer.Option(False),
     out: Path | None = typer.Option(None, "--out", "-o"),
+    detector: str = typer.Option("auto", help="auto | mediapipe | yolo | none"),
+    approve: bool = typer.Option(False, "--approve", help="Approve the review sheet and render"),
     home: Path | None = HOME,
 ) -> None:
-    """watch -> plan -> cut-audit -> render, stopping if the cut audit fails."""
+    """watch -> plan -> cut-audit -> geometry -> review [-> render with --approve]."""
     from ..llm import get_provider
     from ..stages.asr import FasterWhisperTranscriber
     from ..stages.cut_audit import run_cut_audit
@@ -180,7 +252,27 @@ def run_cmd(
             console.print(f"[red]{v.kind}[/red] {v.clip_id or ''} {v.message}")
         console.print("Cut audit failed; fix edl_raw.json or re-plan, then run `llmve cut-audit`.")
         raise typer.Exit(1)
-    res = render(ws, out=out, encoder=encoder, quality="draft" if draft else "high")
+    from ..stages.detectors import get_detector
+    from ..stages.geometry import run_geometry
+    from ..stages.review import build_review, decide
+
+    det = get_detector(detector)
+    try:
+        run_geometry(ws, detector=det)
+    finally:
+        det.close()
+    review = build_review(ws)
+    for sheet in review.sheets:
+        console.print(f"review sheet: {ws.root / sheet}")
+    for w in review.warnings:
+        console.print(f"[yellow]warning:[/yellow] {w}")
+    if not approve:
+        console.print(f"Review the sheet, then `llmve review approve {ws.root}` and "
+                      f"`llmve render {ws.root}`.")
+        raise typer.Exit(2)
+    decide(ws, True, "approved via llmve run --approve")
+    res = render(ws, out=out, encoder=encoder, quality="draft" if draft else "high",
+                 require_review=True)
     _print_qc(res.qc)
     typer.echo(str(res.output))
 

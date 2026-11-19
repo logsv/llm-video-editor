@@ -25,14 +25,18 @@ def test_llmve_run_end_to_end(media_dir, tmp_path, monkeypatch):
 
     monkeypatch.setattr(llm_pkg, "get_provider", lambda *a, **k: FakeProvider(responder))
     out = tmp_path / "final.mp4"
-    result = CliRunner().invoke(app, [
-        "run", str(media_dir), "-p", "4s reel: the intro", "-t", "reels", "--draft",
-        "-o", str(out), "--home", str(tmp_path / "home")])
+    args = ["run", str(media_dir), "-p", "4s reel: the intro", "-t", "reels", "--draft",
+            "-o", str(out), "--home", str(tmp_path / "home"), "--detector", "none"]
+    stopped = CliRunner().invoke(app, args)
+    assert stopped.exit_code == 2 and "review sheet:" in stopped.output  # gate holds
+    assert not out.exists()
+    result = CliRunner().invoke(app, [*args, "--approve"])
     assert result.exit_code == 0, result.output
     assert out.exists() and "QC PASSED" in result.output
     ws_root = next((tmp_path / "home").iterdir())
     for name in ("transcript.json", "clips_manifest.json", "asset_plan.json", "edl_raw.json",
-                 "cut_audit.json", "edl_audited.json", "render/qc_report.json"):
+                 "cut_audit.json", "edl_audited.json", "geometry_map.json",
+                 "review/review.json", "review/sheet_000.png", "render/qc_report.json"):
         assert (ws_root / name).exists(), name
     assert json.loads((ws_root / "cut_audit.json").read_text())["passed"] is True
 

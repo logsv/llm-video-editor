@@ -18,6 +18,7 @@ class EDLClip(Strict):
     role: Literal["a_roll", "broll"] = "a_roll"
     priority: int = 1
     crop_center: tuple[float, float] | None = None  # normalised (x, y); None = centre
+    caption_position: Literal["bottom", "top", "center"] | None = None  # set by take-geometry
     notes: str = ""
 
     @property
@@ -35,6 +36,7 @@ class Overlay(Strict):
     offset: float = 0.0  # seconds after the anchor clip starts in the output
     duration: float
     zone: Literal["full", "pip"] = "full"
+    corner: Literal["tl", "tr", "bl", "br"] = "br"  # picture-in-picture corner
 
 
 class CaptionSettings(Strict):

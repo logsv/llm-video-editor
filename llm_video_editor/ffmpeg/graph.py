@@ -32,6 +32,12 @@ class OverlaySpec:
     at: float  # output seconds
     duration: float
     crop_center: tuple[float, float] | None = None
+    zone: Literal["full", "pip"] = "full"
+    corner: Literal["tl", "tr", "bl", "br"] = "br"
+
+
+PIP_SIZE = 0.4
+PIP_MARGIN = 0.04
 
 
 @dataclass
@@ -113,11 +119,17 @@ def add_overlays(g: Graph, base: str, overlays: list[OverlaySpec], *, width: int
     for j, ov in enumerate(overlays):
         idx = g.add_input("-ss", f"{ov.src_start:.6f}", "-t", f"{ov.duration + 0.5:.6f}",
                           "-i", ov.source_file)
-        g.filters.append(_video_chain(idx, ov.duration, fps,
-                                      fit_filter(width, height, mode, ov.crop_center), f"ov{j}",
-                                      shift=ov.at))
+        if ov.zone == "pip":
+            pw, ph = int(width * PIP_SIZE) // 2 * 2, int(height * PIP_SIZE) // 2 * 2
+            fit = f"scale={pw}:{ph}:force_original_aspect_ratio=decrease:flags=lanczos"
+            mx, my = round(width * PIP_MARGIN), round(height * PIP_MARGIN)
+            x = str(mx) if ov.corner[1] == "l" else f"main_w-overlay_w-{mx}"
+            y = str(my) if ov.corner[0] == "t" else f"main_h-overlay_h-{my}"
+        else:
+            fit, x, y = fit_filter(width, height, mode, ov.crop_center), "0", "0"
+        g.filters.append(_video_chain(idx, ov.duration, fps, fit, f"ov{j}", shift=ov.at))
         end = ov.at + ov.duration
-        g.filters.append(f"[{base}][ov{j}]overlay=x=0:y=0:eof_action=pass:"
+        g.filters.append(f"[{base}][ov{j}]overlay=x={x}:y={y}:eof_action=pass:"
                          f"enable='between(t,{ov.at:.6f},{end - 1e-4:.6f})'[vb{j}]")
         base = f"vb{j}"
     return base

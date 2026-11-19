@@ -63,3 +63,18 @@ def ffprobe_json(path: str | Path, timeout: float = 60) -> dict:
         timeout=timeout,
     )
     return json.loads(proc.stdout)
+
+
+def ffmpeg_bytes(*args: str | Path, timeout: float | None = 120) -> bytes:
+    """Run ffmpeg and return raw stdout bytes (e.g. ``-f rawvideo -``)."""
+    argv = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", *map(str, args)]
+    if shutil.which("ffmpeg") is None:
+        raise FFmpegError("Executable not found on PATH: ffmpeg", argv)
+    try:
+        proc = subprocess.run(argv, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        raise FFmpegError(f"Timed out after {timeout}s: ffmpeg", argv) from e
+    if proc.returncode != 0:
+        raise FFmpegError(f"ffmpeg exited with code {proc.returncode}", argv,
+                          proc.stderr.decode(errors="replace"), proc.returncode)
+    return proc.stdout

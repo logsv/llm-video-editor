@@ -78,7 +78,8 @@ def overlay_specs(edl: EDL, starts: list[float], manifest: ClipsManifest) -> lis
         if ov.anchor_clip_id not in by_id or manifest.get(ov.source_clip_id) is None:
             continue
         at = quantize(by_id[ov.anchor_clip_id] + ov.offset, edl.fps)
-        out.append(OverlaySpec(ov.source_file, ov.src_start, at, quantize(ov.duration, edl.fps)))
+        out.append(OverlaySpec(ov.source_file, ov.src_start, at, quantize(ov.duration, edl.fps),
+                               zone=ov.zone, corner=ov.corner))
     return out
 
 
@@ -118,10 +119,16 @@ def _label(x: str) -> str:
 def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
            encoder: str = "auto", quality: Quality = "high", burn_captions: bool = True,
            target: LoudnessTarget = DEFAULT_TARGET, max_inputs: int = MAX_INPUTS,
-           workers: int = 2) -> RenderResult:
+           workers: int = 2, require_review: bool = False) -> RenderResult:
+    from .geometry import apply_geometry, load_geometry
+    from .review import check_approved
+
     edl = edl or Workspace.read(ws.edl_audited, EDL)
     if not edl.clips:
         raise ValueError("EDL has no clips to render")
+    if require_review:
+        check_approved(ws, edl)
+    edl = apply_geometry(edl, load_geometry(ws, edl))
     manifest = Workspace.read(ws.clips_manifest, ClipsManifest)
     work = ws.render_dir
     work.mkdir(parents=True, exist_ok=True)

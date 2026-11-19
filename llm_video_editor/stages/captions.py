@@ -14,6 +14,7 @@ class Cue:
     start: float
     end: float
     words: list[tuple[float, float, str]]  # (start, end, text) on the output timeline
+    clip_index: int = 0
 
     @property
     def text(self) -> str:
@@ -21,10 +22,13 @@ class Cue:
 
 
 def output_words(edl: EDL, transcript: Transcript, starts: list[float],
-                 durations: list[float]) -> list[tuple[float, float, str]]:
-    """Map every word spoken inside an A-roll clip onto the output timeline."""
+                 durations: list[float]) -> list[tuple[float, float, str, int]]:
+    """Map every word spoken inside an A-roll clip onto the output timeline.
+
+    Returns ``(start, end, text, clip_index)`` tuples.
+    """
     out = []
-    for clip, t0, dur in zip(edl.clips, starts, durations, strict=True):
+    for i, (clip, t0, dur) in enumerate(zip(edl.clips, starts, durations, strict=True)):
         if clip.role != "a_roll":
             continue
         ct = transcript.for_clip(clip.source_clip_id)
@@ -36,29 +40,33 @@ def output_words(edl: EDL, transcript: Transcript, starts: list[float],
             s = max(0.0, w.start - clip.start)
             e = min(dur, w.end - clip.start)
             if e - s > 0.02:
-                out.append((round(t0 + s, 3), round(t0 + e, 3), w.text))
+                out.append((round(t0 + s, 3), round(t0 + e, 3), w.text, i))
     return out
 
 
-def group_cues(words: list[tuple[float, float, str]], max_words: int = 6,
+def group_cues(words: list[tuple[float, float, str, int]], max_words: int = 6,
                max_gap: float = 0.6) -> list[Cue]:
+    """Group words into caption cues; never across a cut or a long pause."""
     cues: list[Cue] = []
-    cur: list[tuple[float, float, str]] = []
+    cur: list[tuple[float, float, str, int]] = []
+
+    def flush():
+        if cur:
+            cues.append(Cue(cur[0][0], cur[-1][1], [w[:3] for w in cur], cur[0][3]))
+            cur.clear()
+
     for w in words:
-        if cur and (len(cur) >= max_words or w[0] - cur[-1][1] > max_gap):
-            cues.append(Cue(cur[0][0], cur[-1][1], cur))
-            cur = []
+        if cur and (len(cur) >= max_words or w[0] - cur[-1][1] > max_gap or w[3] != cur[-1][3]):
+            flush()
         cur.append(w)
         if ends_sentence(Word(start=w[0], end=w[1], text=w[2])):
-            cues.append(Cue(cur[0][0], cur[-1][1], cur))
-            cur = []
-    if cur:
-        cues.append(Cue(cur[0][0], cur[-1][1], cur))
+            flush()
+    flush()
     # hold each cue until the next one starts (up to 0.4s) so text does not flicker
     held = []
     for i, c in enumerate(cues):
         nxt = cues[i + 1].start if i + 1 < len(cues) else c.end + 0.4
-        held.append(Cue(c.start, min(nxt, c.end + 0.4), c.words))
+        held.append(Cue(c.start, min(nxt, c.end + 0.4), c.words, c.clip_index))
     return held
 
 
@@ -75,7 +83,8 @@ ALIGN = {"bottom": 2, "auto": 2, "center": 5, "top": 8}
 
 
 def build_ass(cues: list[Cue], width: int, height: int, *, style: str = "lines",
-              position: str = "auto", margin_v: int | None = None) -> str:
+              position: str = "auto", margin_v: int | None = None,
+              clip_positions: dict[int, str] | None = None) -> str:
     size = round(min(width, height) * 0.065)
     vertical = height > width
     margin_v = margin_v if margin_v is not None else round(height * (0.14 if vertical else 0.07))
@@ -103,6 +112,9 @@ def build_ass(cues: list[Cue], width: int, height: int, *, style: str = "lines",
             text = "".join(parts).rstrip()
         else:
             text = _esc(c.text)
+        pos = (clip_positions or {}).get(c.clip_index)
+        if pos and position == "auto" and ALIGN[pos] != ALIGN[position]:
+            text = f"{{\\an{ALIGN[pos]}}}" + text
         lines.append(f"Dialogue: 0,{_ts(c.start)},{_ts(c.end)},Default,,0,0,0,,{text}")
     return head + "\n".join(lines) + "\n"
 
@@ -113,6 +125,8 @@ def write_captions(path: Path, edl: EDL, transcript: Transcript, starts: list[fl
     if not words:
         return None
     cues = group_cues(words, edl.captions.max_words_per_line)
+    positions = {i: c.caption_position for i, c in enumerate(edl.clips) if c.caption_position}
     path.write_text(build_ass(cues, edl.width, edl.height, style=edl.captions.style,
-                              position=edl.captions.position), encoding="utf-8")
+                              position=edl.captions.position, clip_positions=positions),
+                    encoding="utf-8")
     return path

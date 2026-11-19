@@ -54,3 +54,20 @@ class FakeProvider:
     def complete(self, system, prompt, schema):
         self.prompts.append((system, prompt, schema))
         return self.responder(schema, prompt)
+
+
+class FakeDetector:
+    """Returns the same face box for every frame (normalised source coords)."""
+
+    name = "fake-face"
+
+    def __init__(self, box=(0.05, 0.55, 0.30, 0.95), label="face"):
+        self.box, self.label, self.frames = box, label, 0
+
+    def detect(self, rgb):
+        self.frames += 1
+        assert rgb.ndim == 3 and rgb.shape[2] == 3
+        return [(self.label, self.box, 0.9)] if self.box else []
+
+    def close(self):
+        pass
