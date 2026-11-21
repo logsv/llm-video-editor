@@ -23,7 +23,7 @@ class PlatformSpec:
 PLATFORM_SPECS = {
     "youtube": PlatformSpec(
         name="YouTube",
-        max_duration=3600,  # 1 hour
+        max_duration=43200,  # 12 hours (YouTube's upload limit)
         aspect_ratio="16:9",
         resolution="1920x1080",
         typical_duration=600,  # 10 minutes
@@ -31,6 +31,18 @@ PLATFORM_SPECS = {
         audio_format="aac",
         video_codec="h264",
         quality_preset="high"
+    ),
+
+    "shorts": PlatformSpec(
+        name="YouTube Shorts",
+        max_duration=180,  # 3 minutes
+        aspect_ratio="9:16",
+        resolution="1080x1920",
+        typical_duration=45,
+        subtitle_style="center_overlay",
+        audio_format="aac",
+        video_codec="h264",
+        quality_preset="medium"
     ),
 
     "reels": PlatformSpec(
@@ -181,7 +193,7 @@ def get_ffmpeg_preset(platform: str, gpu_acceleration: bool = True) -> dict[str,
         })
 
     # Platform-specific optimizations
-    if platform.lower() in ["reels", "tiktok"]:
+    if platform.lower() in ["reels", "tiktok", "shorts"]:
         # Mobile-optimized settings
         preset["movflags"] = "+faststart"
         preset["tune"] = "film"
@@ -297,7 +309,7 @@ def validate_platform_constraints(
         )
 
     # Platform-specific checks
-    if platform.lower() in ["reels", "tiktok"]:
+    if platform.lower() in ["reels", "tiktok", "shorts"]:
         if duration < 5:
             validation["warnings"].append("Very short duration may not perform well on this platform")
         if duration > spec.typical_duration * 2:

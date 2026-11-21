@@ -25,3 +25,6 @@ class RenderQC(Checkpoint):
     true_peak: float | None = None
     target_lufs: float = -14.0
     problems: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)  # non-blocking, e.g. YouTube chapter rules
+    chapters: list[tuple[float, str]] = Field(default_factory=list)  # (output seconds, title)
+    captions_srt: str | None = None  # sidecar captions for upload (YouTube Studio)

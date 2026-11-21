@@ -4,6 +4,7 @@ No LLM. Every A-roll cut is clamped to its own source clip's duration and
 snapped to word boundaries from ``transcript.json``; cuts that end mid-sentence
 are extended to the sentence end (or trimmed back to the previous one). Then
 overlaps are merged, too-short clips dropped, and the duration budget enforced.
+Finally ``EDL.pacing`` (jump-cut tightening, punch-ins) is applied; see pacing.py.
 
 Outputs: cut_audit.json, edl_audited.json
 """
@@ -15,6 +16,7 @@ from dataclasses import dataclass
 
 from ..schemas import EDL, ClipsManifest, CutAudit, EDLClip, Transcript, Violation, Word
 from ..workspace import Workspace
+from .pacing import apply_pacing
 
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*$")
 
@@ -134,8 +136,8 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
     merged: list[EDLClip] = []
     for clip in clips:
         prev = merged[-1] if merged else None
-        if (prev and prev.source_clip_id == clip.source_clip_id
-                and clip.start < prev.end and clip.end > prev.start):
+        if (prev and prev.source_clip_id == clip.source_clip_id and clip.start >= prev.start
+                and clip.start < prev.end and clip.end > prev.start):  # forward continuation
             rec.add("overlap", clip, f"overlaps {prev.clip_id} in the source", at=clip.start,
                     fixed=True, fix=f"merged into {prev.clip_id}")
             merged[-1] = EDLClip(**{**prev.model_dump(), "start": min(prev.start, clip.start),
@@ -143,6 +145,12 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
                                     "priority": min(prev.priority, clip.priority)})
             continue
         for other in merged:
+            if (other.source_clip_id == clip.source_clip_id
+                    and clip.start <= other.start and other.end <= clip.end):
+                # an earlier clip replayed inside a later one: a cold open / teaser
+                rec.add("overlap", clip, f"replays {other.clip_id} (teaser or cold open)",
+                        at=other.start, severity="warning")
+                continue
             if (other.source_clip_id == clip.source_clip_id
                     and clip.start < other.end and clip.end > other.start):
                 rec.add("overlap", clip, f"repeats source material from {other.clip_id}",
@@ -183,10 +191,14 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
                     f"{total:.1f}s is under target {target:.1f}s (-{cfg.tolerance:.0%})",
                     severity="warning")
 
+    # -- pacing (after the editorial fixes, so splits land inside audited clips) -----
+    words_for = {ct.clip_id: ct.words() for ct in transcript.clips}
+    kept, paced_overlays, removed = apply_pacing(edl, kept, words_for, list(edl.overlays))
+
     # -- overlays ---------------------------------------------------------------------
     by_id = {c.clip_id: c for c in kept}
     overlays = []
-    for ov in edl.overlays:
+    for ov in paced_overlays:
         anchor, src = by_id.get(ov.anchor_clip_id), manifest.get(ov.source_clip_id)
         if anchor is None or src is None:
             rec.add("overlay_out_of_bounds", None,
@@ -211,7 +223,7 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
         passed=not any(v.severity == "error" and not v.fixed for v in rec.items),
         violations=rec.items, clips_before=before_n, clips_after=len(kept),
         duration_before=round(before_d, 3), duration_after=round(audited.total_duration, 3),
-        target_duration=target, tolerance=cfg.tolerance,
+        target_duration=target, tolerance=cfg.tolerance, pauses_removed=removed,
     )
     return audited, report
 

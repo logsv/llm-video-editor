@@ -115,12 +115,12 @@ def analyze_clip(info: ClipInfo, spans: list[tuple[float, float]], detector: Det
 
 # -- placement maths --------------------------------------------------------------------
 def crop_window(src_w: int, src_h: int, out_w: int, out_h: int, center: tuple[float, float],
-                mode: str = "cover") -> tuple[float, float, float, float]:
+                mode: str = "cover", zoom: float = 1.0) -> tuple[float, float, float, float]:
     """(scale, x0, y0, letterbox) matching ffmpeg/graph.fit_filter."""
     if mode == "contain":
         s = min(out_w / src_w, out_h / src_h)
         return s, -(out_w - src_w * s) / 2, -(out_h - src_h * s) / 2, 1.0
-    s = max(out_w / src_w, out_h / src_h)
+    s = max(out_w / src_w, out_h / src_h) * max(1.0, zoom)
     sw, sh = src_w * s, src_h * s
     x0 = min(max(0.0, center[0] * sw - out_w / 2), sw - out_w)
     y0 = min(max(0.0, center[1] * sh - out_h / 2), sh - out_h)
@@ -128,11 +128,11 @@ def crop_window(src_w: int, src_h: int, out_w: int, out_h: int, center: tuple[fl
 
 
 def keep_box_inside(center: tuple[float, float], box: BBox | None, src_w: int, src_h: int,
-                    out_w: int, out_h: int) -> tuple[float, float]:
+                    out_w: int, out_h: int, zoom: float = 1.0) -> tuple[float, float]:
     """Shift a cover-crop centre so ``box`` fits in the window when it can."""
     if box is None:
         return center
-    s = max(out_w / src_w, out_h / src_h)
+    s = max(out_w / src_w, out_h / src_h) * max(1.0, zoom)
     sw, sh = src_w * s, src_h * s
     cx, cy = center
     for axis, size, scaled in ((0, out_w, sw), (1, out_h, sh)):
@@ -147,8 +147,9 @@ def keep_box_inside(center: tuple[float, float], box: BBox | None, src_w: int, s
 
 
 def box_to_output(box: BBox, src_w: int, src_h: int, out_w: int, out_h: int,
-                  center: tuple[float, float], mode: str = "cover") -> BBox | None:
-    s, x0, y0, _ = crop_window(src_w, src_h, out_w, out_h, center, mode)
+                  center: tuple[float, float], mode: str = "cover",
+                  zoom: float = 1.0) -> BBox | None:
+    s, x0, y0, _ = crop_window(src_w, src_h, out_w, out_h, center, mode, zoom)
     x1 = (box[0] * src_w * s - x0) / out_w
     y1 = (box[1] * src_h * s - y0) / out_h
     x2 = (box[2] * src_w * s - x0) / out_w
@@ -227,9 +228,10 @@ def place_clips(edl: EDL, manifest: ClipsManifest, geos: dict[str, ClipGeometry]
         center = (weighted[0] / total, weighted[1] / total) if total else DEFAULT_FOCUS
         box = _union(boxes)
         if edl.fit_mode == "cover":
-            center = keep_box_inside(center, box, info.width, info.height, edl.width, edl.height)
+            center = keep_box_inside(center, box, info.width, info.height, edl.width, edl.height,
+                                     clip.zoom)
         box_out = (box_to_output(box, info.width, info.height, edl.width, edl.height, center,
-                                 edl.fit_mode) if box else None)
+                                 edl.fit_mode, clip.zoom) if box else None)
         pos, overlap = choose_caption(box_out, edl.width, edl.height)
         bands = caption_bands(edl.width, edl.height)
         corner = choose_pip(box_out, (0.08, *bands[pos][:1], 0.92, bands[pos][1]))

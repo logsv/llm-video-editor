@@ -10,10 +10,11 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
-from llm_video_editor.ffmpeg.runner import ffmpeg
+from llm_video_editor.ffmpeg.runner import ffmpeg, ffprobe_json
 from llm_video_editor.schemas import EDL, ClipsManifest, EDLClip, Overlay
 from llm_video_editor.stages import render as render_mod
 from llm_video_editor.stages.render import render
@@ -117,3 +118,21 @@ def test_render_rejects_unknown_sources(media_dir, tmp_path):
     with pytest.raises(ValueError, match="not in manifest"):
         render(ws, edl, quality="draft")
     assert Workspace.read(ws.clips_manifest, ClipsManifest).clips
+
+
+def test_youtube_long_form_chapters_srt_and_punch_in(media_dir, tmp_path):
+    ws, m = _watched(media_dir, tmp_path)
+    a, b = m["a_talk_1080p30.mp4"], m["b_talk_720p60.mov"]
+    clips = [_clip("c1", a, 0.0, 1.5), _clip("c2", b, 0.5, 2.0), _clip("c3", a, 2.0, 3.4)]
+    clips = [c.model_copy(update=u) for c, u in zip(clips, [
+        {"chapter": "Intro"}, {"zoom": 1.2, "chapter": "Middle"}, {"chapter": "End"}], strict=True)]
+    edl = EDL(target_platform="youtube", width=1280, height=720, clips=clips)
+    res = render(ws, edl, quality="draft", burn_captions=False)
+    qc = res.qc
+    assert qc.passed, qc.problems
+    assert [t for _, t in qc.chapters] == ["Intro", "Middle", "End"]
+    assert any("10s or more" in w for w in qc.warnings)  # a 4 s test cut breaks YouTube's rule
+    chapters = ffprobe_json(res.output, "-show_chapters").get("chapters", [])
+    assert [c["tags"]["title"] for c in chapters] == ["Intro", "Middle", "End"]
+    assert res.output.with_suffix(".chapters.txt").read_text().startswith("0:00 Intro")
+    assert qc.captions_srt and Path(qc.captions_srt).read_text().startswith("1\n")

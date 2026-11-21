@@ -44,7 +44,8 @@ from ..ffmpeg.probe import probe
 from ..ffmpeg.runner import ffmpeg, ffprobe_json
 from ..schemas import EDL, ClipsManifest, RenderQC, Transcript
 from ..workspace import Workspace
-from .captions import write_captions
+from .captions import write_captions, write_srt
+from .chapters import chapter_marks, chapter_warnings, description_block, ffmetadata
 
 MAX_INPUTS = 24
 
@@ -65,7 +66,7 @@ def timeline(edl: EDL, manifest: ClipsManifest) -> tuple[list[Segment], list[flo
         start = snap_to_frame(clip.start, info.fps)
         dur = quantize(clip.end - start, edl.fps)
         segs.append(Segment(info.source_file, round(start, 6), dur, info.has_audio,
-                            clip.crop_center))
+                            clip.crop_center, clip.zoom))
         starts.append(round(t, 6))
         t += dur
     return segs, starts
@@ -159,13 +160,30 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
                              starts, [s.duration for s in segs])
     vchain = f"{_label(base)}ass=captions.ass[vout]" if ass else f"{_label(base)}null[vout]"
     g.filters.append(vchain)
+    marks = chapter_marks(edl, starts)
+    chapter_args: list[str] = []
+    if marks:
+        meta = work / "chapters.ffmeta"
+        meta.write_text(ffmetadata(marks, expected), encoding="utf-8")
+        idx = g.add_input("-f", "ffmetadata", "-i", str(meta.resolve()))
+        chapter_args = ["-map_chapters", str(idx)]
     g.filters.append(f"{_label(a)}{apply_filter(measured, target)},aresample=48000,"
                      f"atrim=duration={expected:.6f}[aout]")
     ffmpeg(*g.input_args, "-filter_complex", g.filter_complex, "-map", "[vout]", "-map", "[aout]",
-           *video_args(enc, edl.fps, quality), *AUDIO_ARGS, "-movflags", "+faststart",
+           *chapter_args, *video_args(enc, edl.fps, quality), *AUDIO_ARGS,
+           "-movflags", "+faststart",
            "-t", f"{expected:.6f}", str(out.resolve()), timeout=None, cwd=work)
 
     qc = quality_check(out, expected, edl, enc, target, silent=is_silent(measured))
+    srt = None
+    if ws.transcript.exists():
+        srt = write_srt(out.with_suffix(".srt"), edl, Workspace.read(ws.transcript, Transcript),
+                        starts, [s.duration for s in segs])
+    if marks:
+        out.with_suffix(".chapters.txt").write_text(description_block(marks), encoding="utf-8")
+    qc = qc.model_copy(update={"warnings": chapter_warnings(marks, expected),
+                               "chapters": [(t, title) for t, title in marks],
+                               "captions_srt": str(srt) if srt else None})
     Workspace.write(work / "qc_report.json", qc)
     for p in mezz or []:
         p.unlink(missing_ok=True)

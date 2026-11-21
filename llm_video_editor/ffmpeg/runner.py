@@ -54,11 +54,12 @@ def ffmpeg(*args: str | Path, timeout: float | None = None, check: bool = True,
                cwd=cwd)
 
 
-def ffprobe_json(path: str | Path, timeout: float = 60) -> dict:
+def ffprobe_json(path: str | Path, *extra: str, timeout: float = 60) -> dict:
+    """ffprobe as JSON; ``extra`` adds sections, e.g. ``"-show_chapters"``."""
     proc = run(
         [
             "ffprobe", "-v", "error", "-print_format", "json",
-            "-show_format", "-show_streams", str(path),
+            "-show_format", "-show_streams", *extra, str(path),
         ],
         timeout=timeout,
     )

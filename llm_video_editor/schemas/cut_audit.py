@@ -41,6 +41,7 @@ class CutAudit(Checkpoint):
     duration_after: float = 0.0
     target_duration: float | None = None
     tolerance: float = 0.05
+    pauses_removed: float = 0.0  # seconds removed by pacing.tighten
 
     @property
     def unresolved(self) -> list[Violation]:

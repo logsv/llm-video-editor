@@ -1,7 +1,14 @@
-"""Burned-in captions: ASS subtitles built from word timestamps on the output timeline."""
+"""Captions from word timestamps on the output timeline.
+
+Burned-in ASS for social cuts, plus a sidecar SRT for every render (upload it
+in YouTube Studio; better than burned-in text for long-form). Standalone
+fillers (um/uh) are left out, and ``CaptionSettings.replacements`` fixes ASR
+mishearings of names and terms.
+"""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,12 +28,23 @@ class Cue:
         return " ".join(w for _, _, w in self.words)
 
 
+def fix_word(text: str, replacements: dict[str, str]) -> str:
+    """Replace a mis-heard word, keeping its punctuation: 'cloud,' -> 'Claude,'."""
+    core = re.sub(r"[^\w'-]", "", text).lower()
+    if core and core in replacements:
+        return re.sub(re.escape(core), replacements[core], text, count=1, flags=re.I)
+    return text
+
+
 def output_words(edl: EDL, transcript: Transcript, starts: list[float],
                  durations: list[float]) -> list[tuple[float, float, str, int]]:
     """Map every word spoken inside an A-roll clip onto the output timeline.
 
     Returns ``(start, end, text, clip_index)`` tuples.
     """
+    from .pacing import is_filler
+
+    reps = {k.lower(): v for k, v in edl.captions.replacements.items()}
     out = []
     for i, (clip, t0, dur) in enumerate(zip(edl.clips, starts, durations, strict=True)):
         if clip.role != "a_roll":
@@ -35,12 +53,12 @@ def output_words(edl: EDL, transcript: Transcript, starts: list[float],
         if ct is None:
             continue
         for w in ct.words():
-            if w.end <= clip.start or w.start >= clip.start + dur:
+            if w.end <= clip.start or w.start >= clip.start + dur or is_filler(w):
                 continue
             s = max(0.0, w.start - clip.start)
             e = min(dur, w.end - clip.start)
             if e - s > 0.02:
-                out.append((round(t0 + s, 3), round(t0 + e, 3), w.text, i))
+                out.append((round(t0 + s, 3), round(t0 + e, 3), fix_word(w.text, reps), i))
     return out
 
 
@@ -129,4 +147,24 @@ def write_captions(path: Path, edl: EDL, transcript: Transcript, starts: list[fl
     path.write_text(build_ass(cues, edl.width, edl.height, style=edl.captions.style,
                               position=edl.captions.position, clip_positions=positions),
                     encoding="utf-8")
+    return path
+
+
+def _srt_ts(t: float) -> str:
+    ms = int(round(max(0.0, t) * 1000))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
+
+
+def build_srt(cues: list[Cue]) -> str:
+    return "\n".join(f"{i}\n{_srt_ts(c.start)} --> {_srt_ts(c.end)}\n{c.text}\n"
+                     for i, c in enumerate(cues, 1))
+
+
+def write_srt(path: Path, edl: EDL, transcript: Transcript, starts: list[float],
+              durations: list[float], max_words: int = 10) -> Path | None:
+    """Sidecar captions: longer lines than burned-in ones (players wrap them)."""
+    words = output_words(edl, transcript, starts, durations)
+    if not words:
+        return None
+    path.write_text(build_srt(group_cues(words, max_words)), encoding="utf-8")
     return path

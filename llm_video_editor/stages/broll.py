@@ -292,7 +292,7 @@ def match_broll(ws: Workspace, library: Path | None = None, *, provider: Provide
     plan = Workspace.read(ws.asset_plan, AssetPlan)
     manifest = Workspace.read(ws.clips_manifest, ClipsManifest)
     transcript = Workspace.read(ws.transcript, Transcript)
-    edl_orientation = "portrait" if plan.target_platform in ("reels", "tiktok") else "landscape"
+    edl_orientation = "portrait" if plan.target_platform in ("reels", "tiktok", "shorts") else "landscape"
 
     docs: list[_Doc] = []
     index = load_index(library) if library else None

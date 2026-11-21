@@ -19,6 +19,8 @@ class EDLClip(Strict):
     priority: int = 1
     crop_center: tuple[float, float] | None = None  # normalised (x, y); None = centre
     caption_position: Literal["bottom", "top", "center"] | None = None  # set by take-geometry
+    zoom: float = Field(1.0, ge=1.0, le=2.0)  # punch-in on top of the fit (1.0 = none)
+    chapter: str | None = None  # a YouTube chapter starts at this clip
     notes: str = ""
 
     @property
@@ -44,6 +46,21 @@ class CaptionSettings(Strict):
     style: Literal["lines", "word_highlight"] = "lines"
     max_words_per_line: int = 6
     position: Literal["auto", "bottom", "top", "center"] = "auto"
+    # ASR fixes applied to burned-in and sidecar captions, e.g. {"cloud": "Claude"}
+    replacements: dict[str, str] = Field(default_factory=dict)
+
+
+class Pacing(Strict):
+    """Jump-cut tightening and punch-ins, applied by cut-audit after the editorial fixes."""
+
+    tighten: bool = False  # remove pauses longer than max_gap inside A-roll clips
+    max_gap: float = Field(0.6, gt=0.0)
+    lead: float = 0.08  # air kept before the first word of each speech island
+    tail: float = 0.18  # air kept after the last word
+    min_island: float = 0.25  # islands shorter than this are dropped
+    drop_fillers: bool = False  # treat standalone um/uh as pauses
+    punch_in: Literal["off", "alternate"] = "off"  # alternate zoom on consecutive jump cuts
+    punch_zoom: float = Field(1.12, ge=1.0, le=2.0)
 
 
 class EDL(Checkpoint):
@@ -56,6 +73,7 @@ class EDL(Checkpoint):
     clips: list[EDLClip] = Field(default_factory=list)
     overlays: list[Overlay] = Field(default_factory=list)
     captions: CaptionSettings = Field(default_factory=CaptionSettings)
+    pacing: Pacing = Field(default_factory=Pacing)
 
     @property
     def total_duration(self) -> float:

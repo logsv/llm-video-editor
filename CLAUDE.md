@@ -10,7 +10,11 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
   checkpoint schemas in `llm_video_editor/schemas/`; LLM providers in `llm_video_editor/llm/`.
 - Checkpoints live in `.llmve/<batch_hash>/` (see README for the file list).
 - CLI: `uv run llmve --help`. The entry skill for editing requests is
-  `.claude/skills/edit-video/SKILL.md`.
+  `.claude/skills/edit-video/SKILL.md`; `youtube-edit` (long-form 16:9) and
+  `youtube-shorts` (vertical clips) specialise it.
+- Long-form options live on the EDL: `pacing` (jump-cut tightening/punch-ins,
+  applied in `stages/pacing.py` at the end of cut-audit), `EDLClip.zoom`,
+  `EDLClip.chapter` (`stages/chapters.py`), `captions.replacements`.
 
 ## Rules for working in this repo
 - Never read raw media (`*.mp4`, `*.mov`, `*.wav`, ...); use JSON checkpoints and

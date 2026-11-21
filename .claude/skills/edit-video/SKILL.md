@@ -5,6 +5,10 @@ description: Turn raw footage (a file, a folder of clips, or a glob) into a plat
 
 # Edit a video with the llmve pipeline
 
+Specialised entry points that follow this pipeline: `youtube-edit` for one
+long recording -> 16:9 YouTube video (cold open, jump-cut pacing, chapters,
+SRT) and `youtube-shorts` for clipping vertical Shorts out of a long video.
+
 You orchestrate deterministic, tested stages. You never open video or audio
 files (`.claude/settings.json` blocks them); you work only from the JSON
 checkpoints and PNG contact sheets the stages write under

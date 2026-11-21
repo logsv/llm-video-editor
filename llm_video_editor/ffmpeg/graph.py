@@ -23,6 +23,7 @@ class Segment:
     duration: float  # seconds, already quantised to output frames
     has_audio: bool
     crop_center: tuple[float, float] | None = None
+    zoom: float = 1.0  # punch-in on top of the cover crop
 
 
 @dataclass(frozen=True)
@@ -66,14 +67,17 @@ def snap_to_frame(seconds: float, fps: float) -> float:
 
 
 def fit_filter(width: int, height: int, mode: FitMode = "cover",
-               center: tuple[float, float] | None = None) -> str:
+               center: tuple[float, float] | None = None, zoom: float = 1.0) -> str:
+    """Fit a source into the output frame; ``zoom`` > 1 punches in around ``center``."""
     if mode == "contain":
         return (f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black")
     cx, cy = center or (0.5, 0.5)
+    sw, sh = (width, height) if zoom <= 1.0 else (
+        2 * round(width * zoom / 2), 2 * round(height * zoom / 2))
     x = f"'max(0,min(iw-{width},{cx:.4f}*iw-{width}/2))'"
     y = f"'max(0,min(ih-{height},{cy:.4f}*ih-{height}/2))'"
-    return (f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
+    return (f"scale={sw}:{sh}:force_original_aspect_ratio=increase:flags=lanczos,"
             f"crop={width}:{height}:{x}:{y}")
 
 
@@ -95,7 +99,8 @@ def add_segments(g: Graph, segments: list[Segment], *, width: int, height: int, 
         v, a = f"{prefix}v{i}", f"{prefix}a{i}"
         if not audio_only:
             g.filters.append(_video_chain(idx, seg.duration, fps,
-                                          fit_filter(width, height, mode, seg.crop_center), v))
+                                          fit_filter(width, height, mode, seg.crop_center,
+                                                     seg.zoom), v))
         if seg.has_audio:
             g.filters.append(
                 f"[{idx}:a:0]asetpts=PTS-STARTPTS,aresample=48000,{AUDIO_FMT},"

@@ -9,6 +9,7 @@ Outputs: asset_plan.json, edl_raw.json
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -94,12 +95,46 @@ class Chunk:
         return "\n".join([head, *self.lines])
 
 
-def _seg_line(seg: Segment) -> str:
-    return f"[{seg.id}] {seg.start:.1f}-{seg.end:.1f} {seg.text}"
+def _opening(text: str, n: int = 4) -> str:
+    return " ".join(re.sub(r"[^a-z0-9' ]", "", text.lower()).split()[:n])
+
+
+def retake_ids(segments: list[Segment], lookahead: int = 3) -> set[int]:
+    """Segments whose opening words are repeated by one of the next few segments.
+
+    People restart a line until it lands; the earlier attempts are usually cut and
+    the last complete take kept. A hint for the planner, not a verdict.
+    """
+    out = set()
+    for i, seg in enumerate(segments):
+        key = _opening(seg.text)
+        if len(key.split()) >= 3 and any(_opening(n.text) == key
+                                         for n in segments[i + 1:i + 1 + lookahead]):
+            out.add(seg.id)
+    return out
+
+
+def _seg_line(seg: Segment, retake: bool = False) -> str:
+    return f"[{seg.id}] {seg.start:.1f}-{seg.end:.1f} {seg.text}" + (" (retake?)" if retake else "")
+
+
+def format_transcript(ct: ClipTranscript, min_pause: float = 2.0) -> str:
+    """Compact, human/LLM-readable view of one clip: ids, times, pauses, retakes."""
+    retakes = retake_ids(ct.segments)
+    lines = [f"## clip {ct.clip_id} ({ct.duration:.1f}s)"]
+    prev_end = 0.0
+    for seg in ct.segments:
+        if seg.start - prev_end >= min_pause:
+            lines.append(f"-- pause {seg.start - prev_end:.1f}s --")
+        unclear = sum(1 for w in seg.words if w.prob < 0.5)
+        lines.append(_seg_line(seg, seg.id in retakes) + (f" (unclear {unclear})" if unclear else ""))
+        prev_end = seg.end
+    return "\n".join(lines)
 
 
 def chunk_transcript(ct: ClipTranscript, seconds: float = CHUNK_SECONDS) -> list[Chunk]:
     """Group a clip's segments into ~``seconds`` windows on segment boundaries."""
+    retakes = retake_ids(ct.segments)
     groups: list[list[Segment]] = []
     for seg in ct.segments:
         if groups and seg.end - groups[-1][0].start <= seconds:
@@ -107,7 +142,8 @@ def chunk_transcript(ct: ClipTranscript, seconds: float = CHUNK_SECONDS) -> list
         else:
             groups.append([seg])
     return [
-        Chunk(f"{ct.clip_id}#{i}", ct.clip_id, g[0].start, g[-1].end, [_seg_line(s) for s in g])
+        Chunk(f"{ct.clip_id}#{i}", ct.clip_id, g[0].start, g[-1].end,
+              [_seg_line(s, s.id in retakes) for s in g])
         for i, g in enumerate(groups)
     ]
 
@@ -160,6 +196,7 @@ def build_reduce_prompt(prompt: str, platform: str, target: float, material: str
         "Pick transcript ranges for the edit in final playback order. Each selection is "
         "clip_id + first_segment..last_segment (inclusive segment ids from the same clip). "
         "Start and end on complete sentences. Durations come from the segment times shown. "
+        "Lines marked (retake?) were restarted: keep the last complete take, skip the false starts. "
         "Optionally add B-roll cutaways from the catalog over selections (or clip_id null "
         "with a query when nothing fits).\n\n"
         f"MATERIAL:\n{material}\n\nB-ROLL CATALOG:\n{catalog}"

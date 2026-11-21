@@ -51,9 +51,9 @@ def _label(text: str, h: int) -> str:
 
 def _tile(out: Path, edl: EDL, src: str, src_t: float, t_out: float, center, box: BBox | None,
           label: str, work: Path, has_ass: bool, overlay: tuple[str, float, str, str] | None,
-          tile: tuple[int, int]) -> None:
+          tile: tuple[int, int], zoom: float = 1.0) -> None:
     W, H = edl.width, edl.height
-    base = (f"[0:v]{fit_filter(W, H, edl.fit_mode, center)},setsar=1,"
+    base = (f"[0:v]{fit_filter(W, H, edl.fit_mode, center, zoom)},setsar=1,"
             f"setpts=PTS-STARTPTS+{t_out:.3f}/TB")
     chain = []
     args = ["-ss", f"{src_t:.3f}", "-i", src]
@@ -132,7 +132,7 @@ def build_review(ws: Workspace, edl: EDL | None = None, *, cols: int = 6, rows: 
             overlay = (spec.source_file, spec.src_start + spec.duration / 2, ov.zone, ov.corner)
             label = f"{ov.overlay_id} over {clip.clip_id} {t_out:.1f}s"
         _tile(work / f"tile_{n:03d}.png", edl, src, src_t, t_out, clip.crop_center, box, label,
-              work, has_ass, overlay, tile)
+              work, has_ass, overlay, tile, clip.zoom)
         tiles.append(ReviewTile(index=n, clip_id=clip.clip_id,
                                 overlay_id=ovp[1].overlay_id if ovp else None,
                                 t_out=round(t_out, 3), source_clip_id=clip.source_clip_id,
