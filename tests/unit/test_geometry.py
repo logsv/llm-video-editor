@@ -96,3 +96,19 @@ def test_place_and_apply_geometry():
     # ... but a different cut ignores a stale map
     moved = edl.model_copy(update={"clips": [edl.clips[0].model_copy(update={"end": 3})]})
     assert apply_geometry(moved, gmap) == moved
+
+
+def test_agent_chosen_crop_and_caption_are_kept():
+    from llm_video_editor.schemas import EDL, ClipPlacement, EDLClip, GeometryMap
+    from llm_video_editor.stages.geometry import apply_geometry, edl_hash
+
+    edl = EDL(target_platform="reels", width=1080, height=1920, clips=[
+        EDLClip(clip_id="c1", source_clip_id="v", source_file="/v.mp4", start=0, end=2,
+                crop_center=(0.2, 0.5)),
+        EDLClip(clip_id="c2", source_clip_id="v", source_file="/v.mp4", start=2, end=4)])
+    place = [ClipPlacement(clip_id=c, crop_center=(0.7, 0.4), caption_position="top")
+             for c in ("c1", "c2")]
+    gmap = GeometryMap(edl_hash=edl_hash(edl), detector="test", placements=place)
+    out = apply_geometry(edl, gmap)
+    assert out.clips[0].crop_center == (0.2, 0.5) and out.clips[1].crop_center == (0.7, 0.4)
+    assert out.clips[0].caption_position == "top"

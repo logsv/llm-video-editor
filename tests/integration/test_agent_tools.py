@@ -152,3 +152,11 @@ def test_first_n_by_recording_time(tmp_path):
     by_time = ok(call("open_project", {"inputs": [str(raw)], "first": 1, "order": "time"},
                       c))["files"]
     assert by_name[0]["name"] == "a.mp4" and by_time[0]["name"] == "b.mp4"
+
+
+def test_unreadable_files_are_skipped_not_fatal(footage, tmp_path):
+    (footage / "0_broken.mp4").write_bytes(b"not a video")
+    c = ctx(tmp_path)
+    opened = ok(call("open_project", {"inputs": [str(footage)], "first": 2}, c))
+    assert opened["skipped"] == [{"name": "0_broken.mp4", "reason": opened["skipped"][0]["reason"]}]
+    assert opened["clips"] == 1 and ok(call("analyze", {"workspace": opened["workspace"]}, c))

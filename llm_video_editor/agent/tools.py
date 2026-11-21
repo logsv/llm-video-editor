@@ -127,12 +127,17 @@ def open_project(ctx: Context, p: OpenP) -> dict:
     """Open footage as a project: inspects every file (HDR, frame rate, audio, split
     recordings, device, time, GPS) without changing anything. Returns the workspace."""
     paths = select_inputs(p.inputs, first=p.first, order=p.order)
-    ws = Workspace.open([str(x) for x in paths], home=ctx.home)
     infos = [inspect(x) for x in paths]
-    groups = group_recordings(infos)
+    usable = [Path(i.path) for i in infos if i.ok]
+    if not usable:
+        raise ValueError("no readable video files: " + "; ".join(f"{i.name}: {i.error}"
+                                                                 for i in infos))
+    ws = Workspace.open([str(x) for x in usable], home=ctx.home)
+    groups = group_recordings([i for i in infos if i.ok])
     facts = {i.path: i.as_dict() for i in infos}
     (ws.root / "footage.json").write_text(json.dumps(facts, indent=2))
-    return {"workspace": str(ws.root), "clips": len(paths), "privacy": ctx.privacy,
+    return {"workspace": str(ws.root), "clips": len(usable), "privacy": ctx.privacy,
+            "skipped": [{"name": i.name, "reason": i.error} for i in infos if not i.ok],
             "split_recordings": groups,
             "files": [{"name": i.name, "ok": i.ok, "duration": i.duration,
                        "size": f"{i.width}x{i.height}", "fps": i.fps, "issues": i.issues}
