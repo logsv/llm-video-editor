@@ -14,6 +14,7 @@ class ReviewTile(Strict):
     index: int
     clip_id: str
     overlay_id: str | None = None
+    graphic_id: str | None = None
     t_out: float  # output-timeline seconds shown in the tile
     source_clip_id: str
     src_t: float

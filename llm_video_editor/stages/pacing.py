@@ -15,8 +15,11 @@ now plays their source moment.
 from __future__ import annotations
 
 import re
+from typing import TypeVar
 
-from ..schemas import EDL, EDLClip, Overlay, Pacing, Word
+from ..schemas import EDL, EDLClip, Graphic, Overlay, Pacing, Word
+
+Anchored = TypeVar("Anchored", Overlay, Graphic)
 
 FILLERS = {"um", "uh", "erm", "uhm", "umm", "hmm", "mm", "ah", "er"}
 
@@ -55,11 +58,13 @@ def speech_islands(start: float, end: float, words: list[Word], p: Pacing
 
 
 def apply_pacing(edl: EDL, clips: list[EDLClip], words_for: dict[str, list[Word]],
-                 overlays: list[Overlay]) -> tuple[list[EDLClip], list[Overlay], float]:
-    """Return (clips, re-anchored overlays, seconds removed)."""
+                 overlays: list[Overlay], graphics: list[Graphic] | None = None
+                 ) -> tuple[list[EDLClip], list[Overlay], list[Graphic], float]:
+    """Return (clips, re-anchored overlays, re-anchored graphics, seconds removed)."""
     p = edl.pacing
+    graphics = list(graphics or [])
     if not p.tighten and p.punch_in == "off":
-        return clips, overlays, 0.0
+        return clips, overlays, graphics, 0.0
     out: list[EDLClip] = []
     pieces_of: dict[str, list[EDLClip]] = {}
     removed = 0.0
@@ -81,15 +86,16 @@ def apply_pacing(edl: EDL, clips: list[EDLClip], words_for: dict[str, list[Word]
         pieces_of[clip.clip_id] = pieces
         out += pieces
 
-    anchored = []
-    for ov in overlays:
-        pieces = pieces_of.get(ov.anchor_clip_id)
+    starts = {c.clip_id: c.start for c in clips}
+
+    def reanchor(item: Anchored) -> Anchored:
+        pieces = pieces_of.get(item.anchor_clip_id)
         if not pieces:
-            anchored.append(ov)  # anchor missing: cut-audit's overlay check drops it
-            continue
-        src_t = clips[[c.clip_id for c in clips].index(ov.anchor_clip_id)].start + ov.offset
+            return item  # anchor missing: cut-audit's bounds check drops it
+        src_t = starts[item.anchor_clip_id] + item.offset
         target = next((pc for pc in pieces if src_t < pc.end), pieces[-1])
-        offset = max(0.0, src_t - target.start)
-        anchored.append(ov.model_copy(update={"anchor_clip_id": target.clip_id,
-                                              "offset": round(offset, 3)}))
-    return out, anchored, round(removed, 3)
+        return item.model_copy(update={"anchor_clip_id": target.clip_id,
+                                       "offset": round(max(0.0, src_t - target.start), 3)})
+
+    return (out, [reanchor(o) for o in overlays], [reanchor(g) for g in graphics],
+            round(removed, 3))

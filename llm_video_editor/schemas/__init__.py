@@ -6,7 +6,7 @@ from .asset_plan import AssetPlan, BrollPlacement, PlannedSegment
 from .base import SCHEMA_VERSION, Checkpoint, Strict
 from .broll import BrollIndex, BrollItem, BrollSelection, Candidate, SlotChoice
 from .cut_audit import CutAudit, Violation
-from .edl import EDL, CaptionSettings, EDLClip, Overlay, Pacing
+from .edl import EDL, CaptionSettings, EDLClip, Graphic, Overlay, Pacing
 from .geometry import ClipGeometry, ClipPlacement, Detection, GeometryMap, SceneGeometry
 from .manifest import ClipInfo, ClipsManifest, SceneCut
 from .render import RenderQC
@@ -49,6 +49,7 @@ __all__ = [
     "Detection",
     "EDLClip",
     "GeometryMap",
+    "Graphic",
     "Overlay",
     "Pacing",
     "PlannedSegment",

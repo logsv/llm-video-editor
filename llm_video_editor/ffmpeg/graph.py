@@ -37,6 +37,16 @@ class OverlaySpec:
     corner: Literal["tl", "tr", "bl", "br"] = "br"
 
 
+@dataclass(frozen=True)
+class GraphicSpec:
+    """A transparent VP9 WebM (HyperFrames output) placed on the output timeline."""
+
+    path: str
+    at: float  # output seconds
+    duration: float
+    box: tuple[float, float, float, float] | None = None  # x, y, w, h (0-1); None = full frame
+
+
 PIP_SIZE = 0.4
 PIP_MARGIN = 0.04
 
@@ -137,4 +147,31 @@ def add_overlays(g: Graph, base: str, overlays: list[OverlaySpec], *, width: int
         g.filters.append(f"[{base}][ov{j}]overlay=x={x}:y={y}:eof_action=pass:"
                          f"enable='between(t,{ov.at:.6f},{end - 1e-4:.6f})'[vb{j}]")
         base = f"vb{j}"
+    return base
+
+
+def add_graphics(g: Graph, base: str, graphics: list[GraphicSpec], *, width: int, height: int,
+                 fps: int) -> str:
+    """Alpha-composite motion graphics over ``base``; returns the new video label.
+
+    The WebM must be decoded with ``libvpx-vp9``: ffmpeg's native VP9 decoder drops
+    the alpha plane and the transparent area turns black.
+    """
+    for k, gr in enumerate(graphics):
+        idx = g.add_input("-c:v", "libvpx-vp9", "-i", gr.path)
+        if gr.box is None:
+            x, y, w, h = 0, 0, width, height
+        else:
+            x, y = round(gr.box[0] * width), round(gr.box[1] * height)
+            w = max(2, round(gr.box[2] * width) // 2 * 2)
+            h = max(2, round(gr.box[3] * height) // 2 * 2)
+        g.filters.append(
+            f"[{idx}:v:0]setpts=PTS-STARTPTS,fps={fps},"
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,format=yuva420p,"
+            f"tpad=stop_mode=add:stop_duration={gr.duration:.6f}:color=black@0,"
+            f"trim=duration={gr.duration:.6f},setpts=PTS-STARTPTS+{gr.at:.6f}/TB[gfx{k}]")
+        end = gr.at + gr.duration
+        g.filters.append(f"[{base}][gfx{k}]overlay=x={x}:y={y}:format=auto:eof_action=pass:"
+                         f"enable='between(t,{gr.at:.6f},{end - 1e-4:.6f})'[vg{k}]")
+        base = f"vg{k}"
     return base

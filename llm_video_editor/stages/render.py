@@ -26,6 +26,7 @@ from ..ffmpeg.graph import (
     Graph,
     OverlaySpec,
     Segment,
+    add_graphics,
     add_overlays,
     add_segments,
     quantize,
@@ -138,6 +139,10 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
 
     segs, starts = timeline(edl, manifest)
     expected = sum(s.duration for s in segs)
+    # motion graphics first: a broken composition fails before the long encode
+    from .graphics import graphic_specs
+
+    gfx = graphic_specs(ws, edl, starts, quality="draft" if quality == "draft" else "high")
 
     # Pass 1: measure loudness of the concatenated programme audio.
     g, _, a, mezz = _base_graph(segs, edl, work, max_inputs, workers, audio_only=True)
@@ -154,6 +159,7 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
     g, v, a, _ = _base_graph(segs, edl, work, max_inputs, workers, mezz=mezz)
     base = add_overlays(g, v, overlay_specs(edl, starts, manifest), width=edl.width,
                         height=edl.height, fps=edl.fps, mode=edl.fit_mode)
+    base = add_graphics(g, base, gfx, width=edl.width, height=edl.height, fps=edl.fps)
     ass = None
     if burn_captions and edl.captions.enabled and ws.transcript.exists():
         ass = write_captions(work / "captions.ass", edl, Workspace.read(ws.transcript, Transcript),

@@ -25,7 +25,8 @@ uv run llmve plan <ws> -t shorts --target-duration 40s -p "<this moment: segment
 Check `edl_raw.json` holds that moment (fix it from `transcript.json` times if
 not; a later punchy line moved to the front is a valid hook) and set
 `"pacing": {"tighten": true, "max_gap": 0.4, "drop_fillers": true}` and
-`"captions": {"style": "word_highlight"}`.
+`"captions": {"style": "word_highlight"}`. Optionally add a `callout` on the hook
+(`uv run llmve graphics add <ws> --at c001 -t callout --duration 2 --var text="..."`).
 ```bash
 uv run llmve cut-audit <ws>
 uv run llmve geometry <ws>        # face-tracked 9:16 crop and caption band

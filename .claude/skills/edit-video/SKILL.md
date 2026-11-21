@@ -25,6 +25,7 @@ and whether a local B-roll library exists.
 | 1 | `watch` | `uv run llmve watch <inputs>` | prints the workspace path; check `clips_manifest.json` |
 | 2 | (plan) | `uv run llmve plan <ws> -p "<brief>" -t <platform> --target-duration 10m` | `edl_raw.json` exists |
 | 3 | `b-roll-select` | `uv run llmve broll match <ws> --library <dir>` | optional |
+| 3b | `motion-graphics` | `uv run llmve graphics add <ws> --at <clip> -t <template> ...` | optional |
 | 4 | `cut-audit` | `uv run llmve cut-audit <ws>` | must print `PASSED` |
 | 5 | `take-geometry` | `uv run llmve geometry <ws>` | every cut has a placement |
 | 6 | `review-gate` | `uv run llmve review <ws>` | **stop and show the sheet to the user** |

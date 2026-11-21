@@ -145,10 +145,40 @@ uv run llmve review approve .llmve/<batch_hash>
 uv run llmve render .llmve/<batch_hash> -o shorts/01-hook.mp4
 ```
 
+### Motion graphics (HyperFrames)
+Lower thirds, chapter title cards, keyword callouts or any custom animated
+HTML/GSAP composition, rendered by [HyperFrames](https://github.com/heygen-com/hyperframes)
+(Apache-2.0) to transparent VP9 WebM and composited in the render pass:
+
+```bash
+uv run llmve graphics doctor --install           # once: Node 22+, pinned HyperFrames + GSAP
+uv run llmve graphics templates                  # lower-third, title-card, callout
+uv run llmve graphics add .llmve/<batch_hash> --at c003 -t lower-third --offset 0.5 \
+    --duration 4 --var title="Jane Doe" --var subtitle="Founder"
+uv run llmve graphics chapters .llmve/<batch_hash>    # a title card per chapter
+uv run llmve graphics add .llmve/<batch_hash> --at c004 -c ./my-composition --box 0.55,0.1,0.4,0.5
+uv run llmve cut-audit .llmve/<batch_hash>       # then geometry, review, render as usual
+```
+
+- Graphics are `EDL.graphics` entries anchored to a clip (like B-roll overlays):
+  cut-audit drops ones with a missing anchor or template, keeps them inside the
+  cut and moves them with jump-cut tightening.
+- Templates size themselves to the output frame (16:9 or 9:16); a custom
+  composition is any HyperFrames project folder with an `index.html`.
+- The review sheet gets a `gNNN over cNNN` tile per graphic; render draws them
+  above B-roll and below burned-in captions. Renders are cached by content hash.
+- The toolchain is pinned (`hyperframes@0.8.34`, `gsap@3.13.0`) and installed into
+  `$LLMVE_TOOLS` (default `~/.cache/llmve`); telemetry and update checks are off.
+  `HYPERFRAMES_BROWSER_PATH` points it at an existing Chrome/Chromium. GSAP is
+  copied in at render time and never committed (it is not open source).
+- Graphics are decoded with `libvpx-vp9`, because ffmpeg's built-in VP9 decoder
+  drops the alpha channel and turns the transparent area black.
+
 ## Install
 
 Needs Python 3.11+, [uv](https://docs.astral.sh/uv/) and FFmpeg with libass
-and libfreetype (`apt install ffmpeg` or `brew install ffmpeg`).
+and libfreetype (`apt install ffmpeg` or `brew install ffmpeg`). Motion graphics
+also need Node.js 22+ and an FFmpeg built with libvpx (standard builds are).
 
 ```bash
 uv sync --extra dev                       # core pipeline + tests
@@ -189,6 +219,11 @@ Every command has `--help`.
 | `llmve broll match <ws>` | fill B-roll slots, rebuild `edl_raw.json` | `-l <library>`, `--provider`, `--model`, `--generate-missing` |
 | `llmve cut-audit <ws>` | snap, fix, budget, apply pacing -> `edl_audited.json` | exits 1 if it fails |
 | `llmve geometry <ws>` | face boxes, crop centres, caption/PiP zones | `--detector auto\|mediapipe\|yolo\|none`, `--samples` |
+| `llmve graphics templates` | list built-in HyperFrames templates and their variables | |
+| `llmve graphics add <ws> --at <clip_id>` | add a motion graphic to `edl_raw.json` | `-t <template>` or `-c <folder>`, `--var k=v`, `--offset`, `--duration`, `--box x,y,w,h` |
+| `llmve graphics chapters <ws>` | a title card per chapter marker | `-t`, `--duration`, `--var`, `--no-numbered` |
+| `llmve graphics render <ws>` | pre-render every graphic (cached) | `--no-draft` |
+| `llmve graphics doctor` | check Node, npm, HyperFrames, libvpx | `--install` |
 | `llmve review <ws>` | build the review sheet (status: pending) | |
 | `llmve review approve <ws>` / `reject <ws>` | record the decision | `--notes "..."` |
 | `llmve render <ws>` | one encode, -14 LUFS, QC, SRT, chapters | `-o out.mp4`, `--encoder auto\|h264_nvenc\|h264_videotoolbox\|libx264`, `--draft`, `--no-captions`, `--skip-review` |
@@ -199,7 +234,7 @@ Every command has `--help`.
 
 `.claude/skills/` exposes the pipeline to Claude Code: `edit-video` (entry
 point), `watch`, `cut-audit`, `take-geometry`, `b-roll-select`,
-`review-gate`, and two specialised entry points: `youtube-edit` (one long
+`review-gate`, `motion-graphics`, and two specialised entry points: `youtube-edit` (one long
 recording into a 16:9 YouTube video with cold open, pacing, chapters and SRT)
 and `youtube-shorts` (vertical clips from a long video). Each skill tells
 Claude which tested `llmve` command to run and how to read its checkpoint.
@@ -209,6 +244,7 @@ Claude which tested `llmve` command to run and how to read its checkpoint.
 | `/edit-video` | any edit from a brief (entry point; runs the whole pipeline) |
 | `/youtube-edit` | one long recording -> 16:9 YouTube video with chapters and SRT |
 | `/youtube-shorts` | the best 20-60 s moments of a long video -> vertical clips |
+| `/motion-graphics` | lower thirds, chapter cards, callouts, custom HyperFrames compositions |
 | `/watch`, `/cut-audit`, `/take-geometry`, `/b-roll-select`, `/review-gate` | one stage on its own |
 
 Claude never approves the review sheet for you unless you tell it to. `.claude/settings.json` denies reads of raw

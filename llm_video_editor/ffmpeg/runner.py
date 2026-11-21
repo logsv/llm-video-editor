@@ -25,6 +25,7 @@ def run(
     check: bool = True,
     input_text: str | None = None,
     cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``argv`` (a list, never a shell string) and capture text output."""
     if isinstance(argv, str | bytes):
@@ -32,11 +33,12 @@ def run(
     args = [str(a) for a in argv]
     if not args:
         raise ValueError("empty argv")
-    if shutil.which(args[0]) is None:
+    if shutil.which(args[0], path=(env or {}).get("PATH")) is None:
         raise FFmpegError(f"Executable not found on PATH: {args[0]}", args)
     try:
         proc = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout, input=input_text, cwd=cwd
+            args, capture_output=True, text=True, timeout=timeout, input=input_text, cwd=cwd,
+            env=env,
         )
     except subprocess.TimeoutExpired as e:
         raise FFmpegError(f"Timed out after {timeout}s: {args[0]}", args) from e

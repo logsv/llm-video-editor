@@ -242,6 +242,109 @@ def geometry_cmd(
                       f"captions {p.caption_position}, PiP {p.pip_corner}")
 
 
+graphics_app = typer.Typer(help="HyperFrames motion graphics: templates, add, chapter cards.",
+                           no_args_is_help=True)
+app.add_typer(graphics_app, name="graphics")
+
+
+def _vars(pairs: list[str]) -> dict[str, str]:
+    out = {}
+    for p in pairs:
+        if "=" not in p:
+            raise typer.BadParameter(f"--var expects key=value, got {p!r}")
+        k, v = p.split("=", 1)
+        out[k.strip()] = v
+    return out
+
+
+@graphics_app.command("templates")
+def graphics_templates_cmd() -> None:
+    """List the built-in templates and their variables."""
+    from ..hyperframes.compose import templates
+
+    for t in templates().values():
+        console.print(f"[bold]{t.name}[/bold]: {t.description}")
+        for v in t.variables:
+            console.print(f"  --var {v['id']}=...  {v.get('label', '')} "
+                          f"(default {v.get('default')!r})")
+
+
+@graphics_app.command("add")
+def graphics_add_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory"),
+    at: str = typer.Option(..., "--at", help="Clip id in edl_raw.json the graphic starts on"),
+    template: str | None = typer.Option(None, "--template", "-t", help="Built-in template"),
+    composition: Path | None = typer.Option(None, "--composition", "-c",
+                                            help="HyperFrames project folder (has index.html)"),
+    offset: float = typer.Option(0.0, help="Seconds after the clip starts"),
+    duration: float = typer.Option(4.0, help="Seconds on screen"),
+    var: list[str] = typer.Option([], "--var", help="Template variable, key=value (repeat)"),
+    box: str | None = typer.Option(None, help="x,y,w,h in 0-1 (default: full frame)"),
+) -> None:
+    """Add a graphic to edl_raw.json; run cut-audit afterwards."""
+    from ..stages.graphics import add_graphic
+
+    if (template is None) == (composition is None):
+        raise typer.BadParameter("pass exactly one of --template or --composition")
+    b = tuple(float(x) for x in box.split(",")) if box else None
+    if b is not None and len(b) != 4:
+        raise typer.BadParameter("--box needs four numbers: x,y,w,h")
+    g = add_graphic(Workspace.load(workspace), anchor=at, duration=duration, template=template,
+                    composition=str(composition) if composition else None, offset=offset,
+                    variables=_vars(var), box=b)
+    console.print(f"{g.graphic_id}: {g.template or g.composition} on {g.anchor_clip_id} "
+                  f"+{g.offset:g}s for {g.duration:g}s. Next: `llmve cut-audit {workspace}`")
+
+
+@graphics_app.command("chapters")
+def graphics_chapters_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory"),
+    template: str = typer.Option("title-card", "--template", "-t"),
+    duration: float = typer.Option(2.5, help="Seconds per card"),
+    var: list[str] = typer.Option([], "--var", help="Extra variable for every card, key=value"),
+    numbered: bool = typer.Option(True, help='Add a "Chapter N" kicker'),
+) -> None:
+    """One title card per chapter marker in edl_raw.json (replaces earlier cards)."""
+    from ..stages.graphics import chapter_cards
+
+    cards = chapter_cards(Workspace.load(workspace), template=template, duration=duration,
+                          variables=_vars(var), numbered=numbered)
+    for g in cards:
+        console.print(f"{g.graphic_id}: {g.variables.get('title')!r} on {g.anchor_clip_id}")
+    if not cards:
+        console.print("[yellow]no clips with a chapter in edl_raw.json[/yellow]")
+
+
+@graphics_app.command("render")
+def graphics_render_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory"),
+    draft: bool = typer.Option(True, help="Draft quality (fast); --no-draft for final quality"),
+) -> None:
+    """Render every graphic in edl_audited.json to transparent WebM (cached)."""
+    from ..schemas import EDL, ClipsManifest
+    from ..stages.graphics import graphic_specs
+    from ..stages.render import timeline
+
+    ws = Workspace.load(workspace)
+    edl = Workspace.read(ws.edl_audited, EDL)
+    _, starts = timeline(edl, Workspace.read(ws.clips_manifest, ClipsManifest))
+    for spec in graphic_specs(ws, edl, starts, quality="draft" if draft else "high"):
+        typer.echo(f"{spec.path}\t{spec.at:.2f}s +{spec.duration:.2f}s")
+
+
+@graphics_app.command("doctor")
+def graphics_doctor_cmd(
+    install: bool = typer.Option(False, help="Install the pinned toolchain if missing"),
+) -> None:
+    """Check Node 22+, npm, the pinned HyperFrames toolchain and ffmpeg's libvpx-vp9."""
+    from ..hyperframes import doctor, ensure
+
+    if install:
+        ensure()
+    for k, v in doctor().items():
+        console.print(f"{k}: {v}")
+
+
 class _ReviewGroup(TyperGroup):
     """`llmve review <ws>` builds the sheet; `llmve review approve|reject <ws>` decides.
 

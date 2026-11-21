@@ -15,6 +15,10 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
 - Long-form options live on the EDL: `pacing` (jump-cut tightening/punch-ins,
   applied in `stages/pacing.py` at the end of cut-audit), `EDLClip.zoom`,
   `EDLClip.chapter` (`stages/chapters.py`), `captions.replacements`.
+- Motion graphics: `EDL.graphics` (HyperFrames compositions). Toolchain/rendering in
+  `llm_video_editor/hyperframes/` (pinned versions, cached WebM, telemetry off);
+  placement in `stages/graphics.py` and `ffmpeg/graph.add_graphics`. Always decode the
+  WebM with `-c:v libvpx-vp9` (the native decoder drops alpha). Never commit GSAP.
 
 ## Rules for working in this repo
 - Never read raw media (`*.mp4`, `*.mov`, `*.wav`, ...); use JSON checkpoints and
@@ -32,6 +36,7 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
 uv sync --extra dev --extra vision   # MediaPipe needs libegl1 on Linux
 uv run ruff check .
 uv run pytest                        # synthetic media; ASR/LLM/detector are faked
+uv run llmve graphics doctor --install   # optional: enables the real HyperFrames tests
 ```
 Python 3.11+, FFmpeg with libass/libfreetype. Optional extras: `vision`, `pro`,
 `gen`, `graph`, `anthropic`, `openai`.

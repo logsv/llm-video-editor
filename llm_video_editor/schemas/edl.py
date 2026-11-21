@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .base import Checkpoint, Strict
 
@@ -41,6 +41,25 @@ class Overlay(Strict):
     corner: Literal["tl", "tr", "bl", "br"] = "br"  # picture-in-picture corner
 
 
+class Graphic(Strict):
+    """A HyperFrames motion graphic (rendered to transparent WebM) over the edit."""
+
+    graphic_id: str
+    template: str | None = None  # built-in: lower-third, title-card, callout
+    composition: str | None = None  # or a HyperFrames project folder (has index.html)
+    variables: dict[str, str | float | bool] = Field(default_factory=dict)
+    anchor_clip_id: str  # EDLClip.clip_id the graphic starts on
+    offset: float = 0.0  # seconds after the anchor clip starts in the output
+    duration: float = Field(gt=0)  # may run past the anchor clip
+    box: tuple[float, float, float, float] | None = None  # x, y, w, h (0-1); None = full frame
+
+    @model_validator(mode="after")
+    def _one_source(self):
+        if (self.template is None) == (self.composition is None):
+            raise ValueError("set exactly one of template or composition")
+        return self
+
+
 class CaptionSettings(Strict):
     enabled: bool = True
     style: Literal["lines", "word_highlight"] = "lines"
@@ -74,6 +93,7 @@ class EDL(Checkpoint):
     overlays: list[Overlay] = Field(default_factory=list)
     captions: CaptionSettings = Field(default_factory=CaptionSettings)
     pacing: Pacing = Field(default_factory=Pacing)
+    graphics: list[Graphic] = Field(default_factory=list)
 
     @property
     def total_duration(self) -> float:
@@ -86,6 +106,13 @@ class EDL(Checkpoint):
             starts.append(t)
             t += c.duration
         return starts
+
+    def anchor_start(self, clip_id: str) -> float | None:
+        """Output-timeline start of a clip, or None if it is not in the cut."""
+        for clip, start in zip(self.clips, self.output_starts(), strict=True):
+            if clip.clip_id == clip_id:
+                return start
+        return None
 
     def overlay_start(self, overlay: Overlay) -> float | None:
         """Output-timeline start of an overlay, or None if its anchor is gone."""

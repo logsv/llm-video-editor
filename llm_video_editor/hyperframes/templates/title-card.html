@@ -1,0 +1,54 @@
+<!doctype html>
+<!-- llmve built-in template: chapter / section title card over a dimmed frame. -->
+<html lang="en" data-composition-variables='[
+  {"id":"title","type":"string","label":"Title","default":"Chapter title"},
+  {"id":"kicker","type":"string","label":"Small line above (e.g. Chapter 2)","default":""},
+  {"id":"accent","type":"color","label":"Accent","default":"#FFC93C"},
+  {"id":"dim","type":"number","label":"Background dim 0-1","default":0.55}
+]'>
+<head>
+<meta charset="utf-8">
+<script src="assets/gsap.min.js"></script>
+<style>
+  html, body { margin: 0; background: transparent; }
+  #root { position: relative; width: __W__px; height: __H__px; overflow: hidden;
+          font-family: "Inter", "Helvetica Neue", Arial, sans-serif; --u: __U__px; }
+  #shade { position: absolute; inset: 0; background: #07080c; }
+  #box { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+         width: 84%; text-align: center; color: #fff; }
+  #kicker { font-size: calc(var(--u) * 3); letter-spacing: 0.18em; text-transform: uppercase;
+            color: var(--accent); font-weight: 600; margin-bottom: calc(var(--u) * 1.6); }
+  #title { font-size: calc(var(--u) * 8.5); font-weight: 800; line-height: 1.05; }
+  #rule { width: calc(var(--u) * 14); height: calc(var(--u) * 0.7); background: var(--accent);
+          margin: calc(var(--u) * 2.6) auto 0; border-radius: calc(var(--u) * 0.4); }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="__D__"
+     data-width="__W__" data-height="__H__">
+  <div id="shade"></div>
+  <div id="box"><div id="kicker"></div><div id="title"></div><div id="rule"></div></div>
+</div>
+<script>
+  const v = window.__hyperframes.getVariables();
+  document.getElementById("root").style.setProperty("--accent", v.accent);
+  document.getElementById("title").textContent = v.title;
+  const k = document.getElementById("kicker");
+  if (v.kicker) { k.textContent = v.kicker; } else { k.style.display = "none"; }
+  const D = __D__;
+  const dim = Math.min(1, Math.max(0, Number(v.dim)));
+  const tl = gsap.timeline({ paused: true });
+  gsap.set("#shade", { opacity: 0 });
+  gsap.set(["#kicker", "#title"], { opacity: 0, y: 30 });
+  gsap.set("#rule", { scaleX: 0 });
+  tl.to("#shade", { opacity: dim, duration: 0.35 }, 0);
+  tl.to("#kicker", { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" }, 0.1);
+  tl.to("#title", { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 0.18);
+  tl.to("#rule", { scaleX: 1, duration: 0.5, ease: "power3.out" }, 0.35);
+  tl.to(["#box", "#shade"], { opacity: 0, duration: 0.35, ease: "power2.in" },
+        Math.max(1.0, D - 0.4));
+  window.__timelines = window.__timelines || {};
+  window.__timelines["main"] = tl;
+</script>
+</body>
+</html>
