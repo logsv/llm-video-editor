@@ -5,10 +5,21 @@ description: Edit one long raw recording (talking head, tutorial, podcast, scree
 
 # /youtube-edit
 
-Long-form specialisation of `edit-video`: same stages, same gates, same rules
-(never open media files, only the user approves the review). Read
-`.claude/skills/edit-video/SKILL.md` first; this skill adds the editorial
-judgement and the long-form options. See `reference.md` for the EDL fields.
+Long-form specialisation of `edit-video`. Default: one command, then refine.
+
+```bash
+uv run llmve auto <recording> -p "<brief: topic, audience, what to keep>" -t youtube \
+    --target-duration 15m --name "Your Name|What you do" -o <out.mp4>
+```
+It removes dead air and long pauses (tight pacing, punch-ins on 1080p+ footage),
+names chapters, adds a ducked licensed music bed and a few cutaways only where
+they help, auto-approves the review, renders with chapters embedded and writes
+`<out>.upload.md` with titles, description, tags and three thumbnails. Show the
+result as `edit-video` describes, then apply notes with `refine-edit` +
+`uv run llmve finish <ws>`.
+
+The sections below are the editorial judgement to apply when refining (or when
+the user wants to drive each stage by hand). See `reference.md` for EDL fields.
 
 ## 1. Intake
 Ask in one message only what you cannot infer: target length (default: what
@@ -41,6 +52,9 @@ edit `edl_raw.json` yourself (times only from `transcript.json`):
   live demos untightened by giving them `"role": "broll"`.
 - **Caption fixes**: `"captions": {"enabled": false, "replacements": {"cloud": "Claude"}}`
   (long-form uploads the SRT instead of burning text in).
+- **Music and cutaways** (optional, `royalty-free-media` skill): a ducked music
+  bed, and `uv run llmve media suggest <ws>` for a few licensed B-roll/funny clips
+  where they help.
 - **Graphics** (optional, `motion-graphics` skill): `uv run llmve graphics chapters <ws>`
   for chapter title cards, a `lower-third` with the speaker's name in the first
   minute, `callout`s for key numbers.
@@ -65,8 +79,11 @@ Check `QC PASSED`, then fix every chapter warning (YouTube silently hides
 chapters that break its rules) and re-render.
 
 ## 6. Deliver
+Run `uv run llmve publish <ws>` (`youtube-publish` skill): it writes the titles,
+description, tags and three thumbnails next to the video. Then report:
 - MP4 path, raw -> final runtime, the 3-5 biggest editorial calls
 - `<out>.chapters.txt` contents, ready to paste into the description
 - `<out>.srt` (upload in YouTube Studio > Subtitles)
-- 3 title options (under 60 characters, payoff first) and 2-3 thumbnail moments
+- the recommended title, the description block and the three thumbnails from
+  `<out>.upload.md`, plus anything listed under "Check before uploading"
 Notes ("cut the part about X") -> edit `edl_raw.json`, re-run from cut-audit.

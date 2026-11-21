@@ -17,9 +17,9 @@ from __future__ import annotations
 import re
 from typing import TypeVar
 
-from ..schemas import EDL, EDLClip, Graphic, Overlay, Pacing, Word
+from ..schemas import EDL, EDLClip, Graphic, MusicTrack, Overlay, Pacing, Word
 
-Anchored = TypeVar("Anchored", Overlay, Graphic)
+Anchored = TypeVar("Anchored", Overlay, Graphic, MusicTrack)
 
 FILLERS = {"um", "uh", "erm", "uhm", "umm", "hmm", "mm", "ah", "er"}
 
@@ -58,13 +58,14 @@ def speech_islands(start: float, end: float, words: list[Word], p: Pacing
 
 
 def apply_pacing(edl: EDL, clips: list[EDLClip], words_for: dict[str, list[Word]],
-                 overlays: list[Overlay], graphics: list[Graphic] | None = None
-                 ) -> tuple[list[EDLClip], list[Overlay], list[Graphic], float]:
-    """Return (clips, re-anchored overlays, re-anchored graphics, seconds removed)."""
+                 overlays: list[Overlay], graphics: list[Graphic] | None = None,
+                 music: list[MusicTrack] | None = None
+                 ) -> tuple[list[EDLClip], list[Overlay], list[Graphic], list[MusicTrack], float]:
+    """Return (clips, overlays, graphics, music - all re-anchored - and seconds removed)."""
     p = edl.pacing
-    graphics = list(graphics or [])
+    graphics, music = list(graphics or []), list(music or [])
     if not p.tighten and p.punch_in == "off":
-        return clips, overlays, graphics, 0.0
+        return clips, overlays, graphics, music, 0.0
     out: list[EDLClip] = []
     pieces_of: dict[str, list[EDLClip]] = {}
     removed = 0.0
@@ -98,4 +99,4 @@ def apply_pacing(edl: EDL, clips: list[EDLClip], words_for: dict[str, list[Word]
                                        "offset": round(max(0.0, src_t - target.start), 3)})
 
     return (out, [reanchor(o) for o in overlays], [reanchor(g) for g in graphics],
-            round(removed, 3))
+            [reanchor(m) for m in music], round(removed, 3))

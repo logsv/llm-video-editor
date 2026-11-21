@@ -293,10 +293,19 @@ def build_edl(plan: AssetPlan, manifest: ClipsManifest) -> EDL:
 
 
 # -- stage entry ---------------------------------------------------------------------
+SPEECH_AIR = 1.15  # cut-audit keeps lead/tail air around every sentence
+
+
 def choose_target(prompt: str, platform: str, explicit: float | None, available: float) -> float:
+    """Requested length, capped by the platform and by what the footage can fill.
+
+    ``available`` is pure speech time; a cut that keeps all of it is ~15% longer
+    once sentences get their lead/tail air, so the cap allows for that instead of
+    making cut-audit drop clips from a "use everything" edit.
+    """
     spec = get_platform_specs(platform)
     target = explicit or duration_from_prompt(prompt) or float(spec["typical_duration"])
-    return round(min(target, float(spec["max_duration"]), available), 3)
+    return round(min(target, float(spec["max_duration"]), available * SPEECH_AIR), 3)
 
 
 def plan(ws: Workspace, prompt: str, provider: Provider, *, target_platform: str = "youtube",

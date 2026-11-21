@@ -23,12 +23,17 @@ from ..ffmpeg.encoders import (
     video_args,
 )
 from ..ffmpeg.graph import (
+    KEY_LEVEL_DB,
+    Ducking,
     Graph,
+    MusicSpec,
     OverlaySpec,
     Segment,
     add_graphics,
+    add_music,
     add_overlays,
     add_segments,
+    add_speech,
     quantize,
     snap_to_frame,
 )
@@ -83,6 +88,58 @@ def overlay_specs(edl: EDL, starts: list[float], manifest: ClipsManifest) -> lis
         out.append(OverlaySpec(ov.source_file, ov.src_start, at, quantize(ov.duration, edl.fps),
                                zone=ov.zone, corner=ov.corner))
     return out
+
+
+def music_specs(edl: EDL, starts: list[float], total: float) -> list[MusicSpec]:
+    """Place every music/SFX track on the output timeline."""
+    by_id = {c.clip_id: s for c, s in zip(edl.clips, starts, strict=True)}
+    out = []
+    for m in edl.music:
+        if m.anchor_clip_id not in by_id:
+            continue
+        at = by_id[m.anchor_clip_id] + m.offset
+        room = total - at
+        if m.duration is not None:
+            dur = m.duration
+        elif m.role == "music" or m.loop:
+            dur = room
+        else:  # a sound effect plays once, to the end of its file
+            fmt = ffprobe_json(Path(m.file).expanduser()).get("format", {})
+            dur = max(0.05, float(fmt.get("duration") or 0) - m.src_start)
+        dur = min(dur, room)
+        if dur <= 0.05:
+            continue
+        out.append(MusicSpec(str(Path(m.file).expanduser().resolve()), round(at, 6),
+                             round(dur, 6), m.src_start, m.volume_db,
+                             m.duck and m.role != "voiceover", m.loop, m.fade_in, m.fade_out,
+                             m.role))
+    return out
+
+
+def measure_speech(segs: list[Segment], edl: EDL, work: Path, tracks: list[MusicSpec],
+                   total: float, max_inputs: int, workers: int, target: LoudnessTarget,
+                   mezz: list[Path] | None) -> tuple[Ducking, list[Path] | None]:
+    """Ducking whose sidechain key is levelled to the measured speech loudness.
+
+    Speech = the clips' own audio plus voice-over tracks. Without this, a quiet
+    recording never crosses a fixed threshold (no ducking) and a loud one ducks
+    all the time.
+    """
+    m = edl.mix
+    base = Ducking(m.duck_depth_db, m.attack_ms, m.release_ms)
+    if not any(t.duck for t in tracks):
+        return base, mezz
+    g, _, a, mezz = _base_graph(segs, edl, work, max_inputs, workers, audio_only=True,
+                                mezz=mezz)
+    a = add_speech(g, a, tracks, total=total)
+    g.filters.append(f"[{a}]{measure_filter(target)}[meas]")
+    proc = ffmpeg(*g.input_args, "-filter_complex", g.filter_complex, "-map", "[meas]",
+                  "-f", "null", "-", timeout=None)
+    speech = parse_loudnorm_json(proc.stderr).get("input_i")
+    if speech is None or speech < -70:  # no speech at all: nothing to duck under
+        return Ducking(m.duck_depth_db, m.attack_ms, m.release_ms, key_gain_db=-60.0), mezz
+    gain = max(-30.0, min(50.0, KEY_LEVEL_DB - speech))
+    return Ducking(m.duck_depth_db, m.attack_ms, m.release_ms, key_gain_db=round(gain, 2)), mezz
 
 
 def _render_mezzanine(i: int, segs: list[Segment], edl: EDL, out_dir: Path) -> Path:
@@ -144,9 +201,15 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
 
     gfx = graphic_specs(ws, edl, starts, quality="draft" if quality == "draft" else "high")
 
-    # Pass 1: measure loudness of the concatenated programme audio.
-    g, _, a, mezz = _base_graph(segs, edl, work, max_inputs, workers, audio_only=True)
-    if mezz is None:
+    tracks = music_specs(edl, starts, expected)
+    ducking, mezz = measure_speech(segs, edl, work, tracks, expected, max_inputs, workers,
+                                   target, None)
+
+    # Pass 1: measure loudness of the programme audio (with music, if any).
+    g, _, a, mezz = _base_graph(segs, edl, work, max_inputs, workers, audio_only=True,
+                                mezz=mezz)
+    if mezz is None or tracks:
+        a = add_music(g, a, tracks, total=expected, ducking=ducking)
         g.filters.append(f"[{a}]{measure_filter(target)}[meas]")
         proc = ffmpeg(*g.input_args, "-filter_complex", g.filter_complex, "-map", "[meas]",
                       "-f", "null", "-", timeout=None)
@@ -160,6 +223,7 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
     base = add_overlays(g, v, overlay_specs(edl, starts, manifest), width=edl.width,
                         height=edl.height, fps=edl.fps, mode=edl.fit_mode)
     base = add_graphics(g, base, gfx, width=edl.width, height=edl.height, fps=edl.fps)
+    a = add_music(g, a, tracks, total=expected, ducking=ducking)
     ass = None
     if burn_captions and edl.captions.enabled and ws.transcript.exists():
         ass = write_captions(work / "captions.ass", edl, Workspace.read(ws.transcript, Transcript),

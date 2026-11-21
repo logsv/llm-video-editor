@@ -98,3 +98,20 @@ def test_cold_open_replay_is_kept():
     assert [(c.clip_id, c.start) for c in out.clips][1] == ("c001", 0.0)  # main cut untouched
     (v,) = [v for v in rep.violations if v.kind == "overlap"]
     assert v.severity == "warning" and "cold open" in v.message and rep.passed
+
+
+def test_budget_counts_the_tightened_length_not_the_pauses():
+    # one 9.6 s clip that holds ~7 s of speech once its two long pauses are removed
+    manifest, tr = _world()
+
+    def edl(pacing):
+        return EDL(target_platform="youtube", width=1920, height=1080, pacing=pacing,
+                   target_duration=9.0, clips=[
+                       EDLClip(clip_id=f"c{i}", source_clip_id="va", source_file="/raw/a.mp4",
+                               start=0.0, end=9.6) for i in range(1)])
+
+    cut, rep = audit(edl(Pacing()), tr, manifest)
+    assert "duration_budget" not in [v.kind for v in rep.violations if v.fixed]  # 9.6 s ~ 9 s
+    cut, rep = audit(edl(Pacing(tighten=True)), tr, manifest)
+    assert rep.passed and len(cut.clips) == 3  # tightened, nothing dropped for the pauses
+    assert cut.total_duration < 9.0 * 1.05

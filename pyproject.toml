@@ -84,7 +84,7 @@ where = ["."]
 include = ["llm_video_editor*"]
 
 [tool.setuptools.package-data]
-llm_video_editor = ["py.typed", "hyperframes/templates/*.html"]
+llm_video_editor = ["py.typed", "hyperframes/templates/*.html", "hyperframes/stills/*.html"]
 
 # Ruff (lint + import sorting)
 [tool.ruff]

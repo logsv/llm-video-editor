@@ -58,3 +58,61 @@ def ffmetadata(marks: list[tuple[float, str]], total: float) -> str:
         lines += ["[CHAPTER]", "TIMEBASE=1/1000", f"START={round(t * 1000)}",
                   f"END={round(end * 1000)}", f"title={esc(title)}"]
     return "\n".join(lines) + "\n"
+
+
+# -- automatic chapters (llmve auto) ----------------------------------------------------
+def suggest_chapters(edl, transcript, provider, *, min_total: float = 120.0) -> dict[str, str]:
+    """Ask the planner to name chapters by clip id; return {clip_id: title} that meets
+    YouTube's rules (first at 0:00, >= 3, each >= 10 s), or {} when it can't."""
+    from pydantic import Field
+
+    from ..llm import structured
+    from ..schemas import Strict
+
+    class _Chapter(Strict):
+        clip_id: str = Field(description="clip that starts the chapter")
+        title: str = Field(description="2-6 words, specific, no numbering")
+
+    class _Chapters(Strict):
+        chapters: list[_Chapter]
+
+    starts = edl.output_starts()
+    total = edl.total_duration
+    if total < min_total or len(edl.clips) < 3:
+        return {}
+    lines = []
+    for clip, t0 in zip(edl.clips, starts, strict=True):
+        ct = transcript.for_clip(clip.source_clip_id)
+        text = ""
+        if ct is not None:
+            seg = next((s for s in ct.segments if s.end > clip.start and s.start < clip.end), None)
+            text = seg.text if seg else ""
+        lines.append(f"{clip.clip_id} @ {stamp(t0)} ({clip.duration:.0f}s): {text[:160]}")
+    res = structured(provider, (
+        "You split a video into YouTube chapters. Start a chapter where the topic changes. "
+        "Titles are short, specific and scannable. Answer strictly in the requested JSON schema."),
+        f"VIDEO: {stamp(total)}. Pick 3-{max(3, min(12, int(total // 60)))} chapter starts "
+        "by clip id (the first chapter starts at the first clip).\n\n" + "\n".join(lines),
+        _Chapters)
+
+    order = {c.clip_id: i for i, c in enumerate(edl.clips)}
+    picked: dict[int, str] = {}
+    for ch in res.chapters:
+        title = re.sub(r"\s+", " ", ch.title.replace("<", "").replace(">", "")).strip()[:60]
+        if ch.clip_id in order and title:
+            picked.setdefault(order[ch.clip_id], title)
+    if not picked:
+        return {}
+    if 0 not in picked:  # the first chapter must start the video
+        first = min(picked)
+        picked[0] = picked.pop(first)
+    kept: list[int] = []
+    for i in sorted(picked):  # drop chapters that would be shorter than 10 s
+        if kept and starts[i] - starts[kept[-1]] < MIN_SECONDS:
+            continue
+        kept.append(i)
+    if kept and total - starts[kept[-1]] < MIN_SECONDS:
+        kept.pop()
+    if len(kept) < MIN_CHAPTERS:
+        return {}
+    return {edl.clips[i].clip_id: picked[i] for i in kept}

@@ -90,7 +90,8 @@ def test_target_is_capped_by_available_speech(watched):
         {"clip_id": talk[0], "first_segment": 0, "last_segment": 1, "purpose": "p",
          "priority": 1}]}))
     asset_plan, _ = plan(watched, "10m edit", provider, target_platform="youtube")
-    assert asset_plan.target_duration == pytest.approx(6.4)  # 2 clips x (1.75s + 1.45s) of speech
+    # 2 clips x (1.75s + 1.45s) of speech, plus 15% for the air cut-audit keeps around sentences
+    assert asset_plan.target_duration == pytest.approx(6.4 * 1.15)
 
 
 def test_all_broll_folder_builds_montage(media_dir, tmp_path):
@@ -111,3 +112,11 @@ def test_chunking_respects_window():
     chunks = chunk_transcript(ct, seconds=60)
     assert len(chunks) == 3
     assert all(c.end - c.start <= 60 for c in chunks)
+
+
+def test_target_allows_air_around_sentences_when_capped_by_speech():
+    from llm_video_editor.stages.plan import choose_target
+
+    assert choose_target("3 minute edit", "youtube", None, available=100.0) == 115.0
+    assert choose_target("1 minute edit", "youtube", None, available=100.0) == 60.0
+    assert choose_target("", "shorts", None, available=1000.0) == 45.0
