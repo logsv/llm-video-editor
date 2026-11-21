@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(**/*.mp4)",
+      "Read(**/*.mov)",
+      "Read(**/*.mkv)",
+      "Read(**/*.avi)",
+      "Read(**/*.m4v)",
+      "Read(**/*.webm)",
+      "Read(**/*.mxf)",
+      "Read(**/*.wav)",
+      "Read(**/*.mp3)",
+      "Read(**/*.m4a)",
+      "Read(**/*.aac)",
+      "Read(**/*.flac)"
+    ]
+  }
+}

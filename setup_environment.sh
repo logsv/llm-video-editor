@@ -28,14 +28,11 @@ if ! uv python list | grep -q "3.11"; then
     uv python install 3.11
 fi
 
-echo "Creating uv project environment..."
-uv sync
+echo "Creating uv project environment (core + dev tools)..."
+uv sync --extra dev
 
-echo "Installing core dependencies..."
-uv add -e .
-
-echo "Installing pro polish features (optional)..."
-if uv add --optional pro 2>/dev/null; then
+echo "Installing vision + pro features (optional)..."
+if uv sync --extra dev --extra vision --extra pro 2>/dev/null; then
     echo "✅ Pro features installed successfully"
 else
     echo "⚠️ Some pro features may require additional system dependencies"
