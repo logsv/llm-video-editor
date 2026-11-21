@@ -8,6 +8,21 @@ normalised to -14 LUFS.
 
 ![LLM Video Editor Workflow](assets/video_editor_workflow.gif)
 
+## Quick start
+
+**In Claude Code** (open this repo, then type a slash command):
+
+```
+/edit-video 10 minute YouTube edit of ./raw_clips: the three key ideas
+/youtube-edit edit ~/Videos/raw-tutorial.mp4 for YouTube, about 15 minutes
+/youtube-shorts make 3 shorts from ~/Videos/raw-tutorial.mp4
+```
+
+Claude runs the stages below, stops at the review sheet for your approval, and
+then renders.
+
+**From the terminal:**
+
 ```bash
 uv run llmve run ./raw_clips/ -p "10 minute YouTube edit: the three key ideas" -t youtube
 # ... look at the review sheet it prints, then:
@@ -29,7 +44,7 @@ under `.llmve/<batch_hash>/`. The batch hash comes from the sorted
 | cut-audit | `llmve cut-audit <ws>` | `cut_audit.json`, `edl_audited.json` | deterministic: word-edge snapping, sentence completion, per-clip clamping, overlaps, duration budget |
 | take-geometry | `llmve geometry <ws>` | `geometry_map.json` | MediaPipe face boxes per used scene; crop centre, caption band and PiP corner that avoid the face |
 | review-gate | `llmve review <ws>` / `review approve` | `review/sheet_*.png`, `review/review.json` | one composited frame per cut/overlay in seconds; render refuses until the current cut is approved |
-| render | `llmve render <ws>` | `render/<platform>.mp4`, `render/qc_report.json` | one encode; every segment normalised to 30 fps, square pixels, cover-crop/letterbox (never stretched), 48 kHz stereo; frame-exact concat; two-pass `loudnorm=I=-14:TP=-1.5:LRA=11`; NVENC/VideoToolbox when they actually work |
+| render | `llmve render <ws>` | `render/<platform>.mp4` (+ `.srt`, `.chapters.txt`), `render/qc_report.json` | one encode; every segment normalised to 30 fps, square pixels, cover-crop/letterbox (never stretched), 48 kHz stereo; frame-exact concat; two-pass `loudnorm=I=-14:TP=-1.5:LRA=11`; NVENC/VideoToolbox when they actually work |
 
 `llmve transcript <ws>` writes a compact `transcript.md` (segment ids, times,
 `(retake?)` markers, long pauses) for reading or planning by hand.
@@ -72,6 +87,64 @@ to `watch()`, or set `Deps(asr_chunking=ChunkConfig(...))` for the LangGraph
 graph. `ChunkConfig` also exposes the chunk length, overlap, search window and
 silence threshold.
 
+### Long-form YouTube: pacing, punch-ins, chapters
+One long recording into a finished 16:9 video (this is what `/youtube-edit`
+runs):
+
+```bash
+uv run llmve watch ./raw/recording.mp4 --chunk-asr-over 10
+uv run llmve transcript .llmve/<batch_hash>        # read transcript.md: retakes, pauses
+uv run llmve plan .llmve/<batch_hash> -t youtube --target-duration 15m \
+    -p "keep the last clean take of every line, cut setup chatter, open on the result"
+# optional: edit edl_raw.json (cold open, chapters, pacing, caption fixes; see below)
+uv run llmve cut-audit .llmve/<batch_hash>         # also applies pacing.tighten
+uv run llmve geometry .llmve/<batch_hash>
+uv run llmve review .llmve/<batch_hash>            # look at review/sheet_*.png
+uv run llmve review approve .llmve/<batch_hash> --notes "looks good"
+uv run llmve render .llmve/<batch_hash> --no-captions -o final.mp4
+# -> final.mp4 (chapters embedded), final.srt, final.chapters.txt
+```
+
+Optional EDL fields in `edl_raw.json`:
+
+```json
+{"pacing": {"tighten": true, "max_gap": 0.6, "drop_fillers": true, "punch_in": "alternate"},
+ "captions": {"enabled": false, "replacements": {"cloud": "Claude"}},
+ "clips": [{"clip_id": "c001", "chapter": "Intro", "zoom": 1.0, "...": "..."}]}
+```
+
+- **Jump-cut tightening** runs as the last step of cut-audit: A-roll clips are
+  split into speech islands at pauses longer than `max_gap` (standalone um/uh
+  count as pauses with `drop_fillers`). Splits sit on word edges inside clips
+  that already passed the sentence checks; overlays follow the piece that plays
+  their moment.
+- **Punch-ins**: `zoom` per clip, or `punch_in: alternate` to zoom every second
+  island so jump cuts read as camera changes. Geometry and review use the same
+  zoomed crop.
+- **Chapters**: `chapter` on the clip that starts a topic. Render embeds them in
+  the MP4, writes `<out>.chapters.txt` for the description and warns when
+  YouTube's rules (first at 0:00, at least 3, each 10 s or more) are broken.
+- **Cold opens**: a hook replayed from later in the recording is kept (cut-audit
+  reports it as a warning instead of trimming the later clip).
+- **Captions**: every render also writes `<out>.srt` (fillers removed,
+  `captions.replacements` applied) for upload; `--no-captions` skips burning in.
+- The `youtube` preset allows up to 12 hours; `shorts` is a 9:16 preset (180 s max).
+
+### Shorts from a long video
+One workspace holds one cut at a time, so make shorts one after another (this
+is what `/youtube-shorts` runs):
+
+```bash
+uv run llmve transcript .llmve/<batch_hash>        # pick the moments (segment ids)
+uv run llmve plan .llmve/<batch_hash> -t shorts --target-duration 40s \
+    -p "segments 41-47 only, hook first"
+uv run llmve cut-audit .llmve/<batch_hash>
+uv run llmve geometry .llmve/<batch_hash>          # face-tracked 9:16 crop
+uv run llmve review .llmve/<batch_hash>
+uv run llmve review approve .llmve/<batch_hash>
+uv run llmve render .llmve/<batch_hash> -o shorts/01-hook.mp4
+```
+
 ## Install
 
 Needs Python 3.11+, [uv](https://docs.astral.sh/uv/) and FFmpeg with libass
@@ -100,32 +173,27 @@ with a JSON-schema `format`), `anthropic` and `openai`. Every provider returns
 a validated Pydantic model. Prompts that mention a media file path are
 rejected before they're sent.
 
-### Long-form YouTube: pacing, punch-ins, chapters
-Optional EDL fields (set them in `edl_raw.json`, or let the `youtube-edit`
-skill do it):
+## Command reference
 
-```json
-{"pacing": {"tighten": true, "max_gap": 0.6, "drop_fillers": true, "punch_in": "alternate"},
- "captions": {"enabled": false, "replacements": {"cloud": "Claude"}},
- "clips": [{"clip_id": "c001", "chapter": "Intro", "zoom": 1.0, "...": "..."}]}
-```
+`<ws>` is the workspace directory `llmve watch` prints (`.llmve/<batch_hash>`).
+Every command has `--help`.
 
-- **Jump-cut tightening** runs as the last step of cut-audit: A-roll clips are
-  split into speech islands at pauses longer than `max_gap` (standalone um/uh
-  count as pauses with `drop_fillers`). Splits sit on word edges inside clips
-  that already passed the sentence checks; overlays follow the piece that plays
-  their moment.
-- **Punch-ins**: `zoom` per clip, or `punch_in: alternate` to zoom every second
-  island so jump cuts read as camera changes. Geometry and review use the same
-  zoomed crop.
-- **Chapters**: `chapter` on the clip that starts a topic. Render embeds them in
-  the MP4, writes `<out>.chapters.txt` for the description and warns when
-  YouTube's rules (first at 0:00, at least 3, each 10 s or more) are broken.
-- **Cold opens**: a hook replayed from later in the recording is kept (cut-audit
-  reports it as a warning instead of trimming the later clip).
-- **Captions**: every render also writes `<out>.srt` (fillers removed,
-  `captions.replacements` applied) for upload; `--no-captions` skips burning in.
-- The `youtube` preset allows up to 12 hours; `shorts` is a 9:16 preset (180 s max).
+| Command | What it does | Useful options |
+|---|---|---|
+| `llmve watch <inputs...>` | transcribe, score scenes, classify A-roll/B-roll, overview sheets | `--asr-model` (default `distil-large-v3`, English), `--language`, `--chunk-asr-over <min>`, `--asr-workers`, `--home` |
+| `llmve watch-window <ws> <clip_id> <start> <end>` | dense contact sheets for one window | `--fps` (default 2) |
+| `llmve transcript <ws>` | write `transcript.md` with ids, times, pauses, `(retake?)` | `--clip <clip_id>` |
+| `llmve plan <ws> -p "<brief>"` | plan the cut -> `asset_plan.json`, `edl_raw.json` | `-t youtube\|shorts\|reels\|tiktok\|twitter\|linkedin`, `--target-duration 10m`, `--provider claude-cli\|ollama\|anthropic\|openai`, `--model` |
+| `llmve broll index <library>` | index a B-roll folder (incremental) | `--rescan`, `--no-sheets` |
+| `llmve broll describe <library> <item_id> "<text>"` | set a manual description | `--tags a,b,c` |
+| `llmve broll match <ws>` | fill B-roll slots, rebuild `edl_raw.json` | `-l <library>`, `--provider`, `--model`, `--generate-missing` |
+| `llmve cut-audit <ws>` | snap, fix, budget, apply pacing -> `edl_audited.json` | exits 1 if it fails |
+| `llmve geometry <ws>` | face boxes, crop centres, caption/PiP zones | `--detector auto\|mediapipe\|yolo\|none`, `--samples` |
+| `llmve review <ws>` | build the review sheet (status: pending) | |
+| `llmve review approve <ws>` / `reject <ws>` | record the decision | `--notes "..."` |
+| `llmve render <ws>` | one encode, -14 LUFS, QC, SRT, chapters | `-o out.mp4`, `--encoder auto\|h264_nvenc\|h264_videotoolbox\|libx264`, `--draft`, `--no-captions`, `--skip-review` |
+| `llmve run <inputs...> -p "<brief>"` | watch -> plan -> b-roll -> cut-audit -> geometry -> review | all of the above plus `--broll-library`, `--approve` (approve and render) |
+| `llmve schema <name>` | JSON Schema of a checkpoint (`edl`, `transcript`, `qc_report`, ...) | |
 
 ## Claude Code skills
 
@@ -133,8 +201,17 @@ skill do it):
 point), `watch`, `cut-audit`, `take-geometry`, `b-roll-select`,
 `review-gate`, and two specialised entry points: `youtube-edit` (one long
 recording into a 16:9 YouTube video with cold open, pacing, chapters and SRT)
-and `youtube-shorts` (vertical clips from a long video). Each skill tells Claude which tested `llmve` command to run and
-how to read its checkpoint. `.claude/settings.json` denies reads of raw
+and `youtube-shorts` (vertical clips from a long video). Each skill tells
+Claude which tested `llmve` command to run and how to read its checkpoint.
+
+| Slash command | Use it for |
+|---|---|
+| `/edit-video` | any edit from a brief (entry point; runs the whole pipeline) |
+| `/youtube-edit` | one long recording -> 16:9 YouTube video with chapters and SRT |
+| `/youtube-shorts` | the best 20-60 s moments of a long video -> vertical clips |
+| `/watch`, `/cut-audit`, `/take-geometry`, `/b-roll-select`, `/review-gate` | one stage on its own |
+
+Claude never approves the review sheet for you unless you tell it to. `.claude/settings.json` denies reads of raw
 video/audio, so agents work only from JSON checkpoints and contact sheets.
 
 ## Programmatic use
@@ -157,8 +234,9 @@ print(final["output"], final["qc_passed"])
 ## Development
 
 ```bash
+uv sync --extra dev --extra vision   # MediaPipe needs libegl1 on Linux
 uv run ruff check .
-uv run pytest
+uv run pytest                        # or: uv run pytest tests/unit -q
 ```
 The integration tests generate synthetic multi-camera media with ffmpeg and
 check A/V sync with flash/beep markers, -14 LUFS output, the review gate and

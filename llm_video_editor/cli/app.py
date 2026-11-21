@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from typer.core import TyperGroup
 from rich.table import Table
 
 from ..schemas import CHECKPOINTS
@@ -103,6 +104,7 @@ def transcript_cmd(
     typer.echo(str(out))
 
 
+TARGETS = "youtube | shorts | reels | tiktok | twitter | linkedin"
 PROVIDER = typer.Option("claude-cli", help="Planner: claude-cli | ollama | anthropic | openai")
 
 
@@ -110,7 +112,7 @@ PROVIDER = typer.Option("claude-cli", help="Planner: claude-cli | ollama | anthr
 def plan_cmd(
     workspace: Path = typer.Argument(..., help="Workspace directory printed by `watch`"),
     prompt: str = typer.Option(..., "--prompt", "-p", help="What the edit should be"),
-    target: str = typer.Option("youtube", "--target", "-t", help="youtube | reels | tiktok ..."),
+    target: str = typer.Option("youtube", "--target", "-t", help=TARGETS),
     target_duration: str | None = typer.Option(None, help="e.g. 10m, 90s, 1:30"),
     provider: str = PROVIDER,
     model: str | None = typer.Option(None, help="Provider-specific model name"),
@@ -240,20 +242,31 @@ def geometry_cmd(
                       f"captions {p.caption_position}, PiP {p.pip_corner}")
 
 
-review_app = typer.Typer(help="Pre-render review gate.", invoke_without_command=True)
+class _ReviewGroup(TyperGroup):
+    """`llmve review <ws>` builds the sheet; `llmve review approve|reject <ws>` decides.
+
+    A group-level positional argument would swallow the subcommand name
+    (`review approve <ws>` parsed "approve" as the workspace), so a bare
+    workspace is routed to the hidden `build` subcommand instead.
+    """
+
+    def parse_args(self, ctx, args):
+        if args and args[0] not in self.commands and not args[0].startswith("-"):
+            args = ["build", *args]
+        return super().parse_args(ctx, args)
+
+
+review_app = typer.Typer(help="Pre-render review gate: `llmve review <ws>`, then "
+                              "`llmve review approve <ws>` or `llmve review reject <ws>`.",
+                         cls=_ReviewGroup, no_args_is_help=True)
 app.add_typer(review_app, name="review")
 
 
-@review_app.callback()
+@review_app.command("build", hidden=True)
 def review_cmd(
-    ctx: typer.Context,
-    workspace: Path | None = typer.Argument(None, help="Workspace directory"),
+    workspace: Path = typer.Argument(..., help="Workspace directory"),
 ) -> None:
     """Build the review contact sheet for the current cut (status: pending)."""
-    if ctx.invoked_subcommand is not None:
-        return
-    if workspace is None:
-        raise typer.BadParameter("workspace is required")
     from ..stages.review import build_review
 
     ws = Workspace.load(workspace)
@@ -330,7 +343,7 @@ def _print_qc(qc) -> None:
 def run_cmd(
     inputs: list[str] = typer.Argument(..., help="Video file(s), folder(s) or glob(s)"),
     prompt: str = typer.Option(..., "--prompt", "-p"),
-    target: str = typer.Option("youtube", "--target", "-t"),
+    target: str = typer.Option("youtube", "--target", "-t", help=TARGETS),
     target_duration: str | None = typer.Option(None, help="e.g. 10m, 90s, 1:30"),
     provider: str = PROVIDER,
     model: str | None = typer.Option(None),
