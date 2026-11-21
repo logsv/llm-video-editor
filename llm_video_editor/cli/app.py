@@ -7,8 +7,8 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from typer.core import TyperGroup
 from rich.table import Table
+from typer.core import TyperGroup
 
 from ..schemas import CHECKPOINTS
 from ..workspace import Workspace
