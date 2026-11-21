@@ -28,8 +28,12 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
   audit (report only), review, render, publish, media, profile, remember). Every edit
   tool needs a `reason`; every edit is a version (`agent/edits.py`, `<ws>/edits/`) and is
   logged in `agent_log.jsonl` + `decisions.md`.
-- `agent/mcp_server.py` serves the registry over MCP (`llmve mcp`, project `.mcp.json`);
-  `llmve tool <name> '<json>'` calls one tool from the terminal.
+- `agent/mcp_server.py` serves the registry over MCP (`python -m llm_video_editor mcp`,
+  project `.mcp.json`); `llmve tool <name> '<json>'` calls one tool from the terminal.
+  Over MCP, `analyze`/`review`/`render` run as jobs in their own process
+  (`agent/jobs.py`, `<ws>/jobs/`) and return a `job_id` for `job_status` when slow.
+- Renders never go inside a footage folder (`workspace.check_output_path`); folder
+  scans skip `.llmve` workspaces and earlier renders (`<video>.llmve.json`).
 - Privacy: `stills` (requested frames/sheets/thumbnails may go to the model) or
   `text-only`; video files are never sent. Set by the user (`llmve profile --set
   privacy=...`), never by the agent.

@@ -2,7 +2,15 @@
   "mcpServers": {
     "llmve": {
       "command": "uv",
-      "args": ["run", "--extra", "agent", "llmve", "mcp"]
+      "args": [
+        "run",
+        "--extra",
+        "agent",
+        "python",
+        "-m",
+        "llm_video_editor",
+        "mcp"
+      ]
     }
   }
 }

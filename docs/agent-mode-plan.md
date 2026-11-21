@@ -1,6 +1,9 @@
 # Agent mode: plan
 
-Status: P0 (foundation) implemented on branch `claude/agent-mode`; P1-P5 to do.
+Status: P0 (foundation) implemented and merged; fixes from the first real run (background
+jobs for long tools, batch params shape, media results from every search, the `python -m`
+launcher, renders kept out of footage folders, absolute workspace paths) on
+`claude/agent-mode-fixes`; P1-P5 to do.
 
 ## Goal
 

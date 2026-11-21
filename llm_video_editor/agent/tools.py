@@ -23,8 +23,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..schemas import EDL, ClipsManifest, Transcript
-from ..workspace import Workspace
-from . import ops
+from ..workspace import Workspace, check_output_path
+from . import jobs, ops
 from .edits import EditConflict, EditError, EditStore
 from .footage import group_recordings, inspect, select_inputs
 
@@ -53,6 +53,10 @@ class Context:
     home: Path | None = None
     transcriber_factory: Callable[[str], Any] | None = None
     images_out: list[str] = field(default_factory=list)  # images the last call returned
+    # long tools (analyze, review, render): "off" runs them in the call (terminal use);
+    # "process"/"thread" run them as background jobs polled with job_status (MCP)
+    jobs: Literal["off", "thread", "process"] = "off"
+    job_wait: float = 20.0  # seconds a long call waits before returning a job id
 
 
 @dataclass(frozen=True)
@@ -91,6 +95,11 @@ def call(name: str, args: dict[str, Any], ctx: Context | None = None) -> dict:
         return {"error": f"bad arguments for {name}: {err['msg']} at "
                          f"{'.'.join(map(str, err['loc'])) or '(root)'}"}
     try:
+        if ctx.jobs != "off" and name in jobs.LONG_TOOLS:
+            ws = _ws(params.workspace)  # type: ignore[attr-defined]
+            job = jobs.start(name, params.model_dump(mode="json"), ctx, ws.root, ctx.job_wait)
+            ctx.images_out = job.get("images", []) if job["status"] == "done" else []
+            return jobs.summary(job)
         return t.run(ctx, params)
     except (EditError, EditConflict, ValueError, FileNotFoundError, KeyError) as e:
         return {"error": str(e).strip("'\"")}
@@ -512,9 +521,31 @@ _BATCHABLE = {"add_clip": ops.add_clip, "remove_clip": ops.remove_clip,
               "remove_item": ops.remove_item}
 
 
+# per-call keys of the standalone tools that a batch sets once for all its operations
+_BATCH_LEVEL = ("workspace", "reason", "expected_version")
+
+
+def _op_params(op: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Accept an operation's params in the same shape as the standalone tool: tools that
+    take a nested ``fields`` dict (set_clip, set_pacing, add_item, ...) may pass it nested
+    or flat. Per-call keys (workspace, reason) are ignored: the batch carries them."""
+    out = {k: v for k, v in params.items() if k not in _BATCH_LEVEL}
+    nested = out.pop("fields", None)
+    if nested is not None:
+        if not isinstance(nested, dict):
+            raise EditError(f"{op}: `fields` must be an object")
+        clash = sorted(set(nested) & set(out))
+        if clash:
+            raise EditError(f"{op}: {', '.join(clash)} given both inside and outside `fields`")
+        out.update(nested)
+    return out
+
+
 class Op(P):
     op: str = Field(description=f"one of {', '.join(_BATCHABLE)}")
-    params: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(
+        default_factory=dict, description="the same arguments as the standalone tool "
+        "(nested `fields` or flat both work); workspace and reason come from the batch")
 
 
 class BatchP(EditP):
@@ -533,7 +564,7 @@ def batch(ctx: Context, p: BatchP) -> dict:
             if fn is None:
                 raise EditError(f"operation {n}: unknown op {o.op!r}")
             try:
-                edl = fn(edl, manifest, **o.params)
+                edl = fn(edl, manifest, **_op_params(o.op, o.params))
             except TypeError as e:
                 raise EditError(f"operation {n} ({o.op}): {e}") from e
             except EditError as e:
@@ -612,7 +643,7 @@ def review(ctx: Context, p: ReviewP) -> dict:
 
 
 class RenderP(WsP):
-    out: str = Field(description="output .mp4 path")
+    out: str = Field(description="output .mp4 path, outside the footage folder")
     reason: str = Field(min_length=3, description="why the edit is ready (your approval)")
     draft: bool = Field(False, description="fast low-quality encode for checking")
     encoder: str = "auto"
@@ -626,11 +657,11 @@ def render_tool(ctx: Context, p: RenderP) -> dict:
     from ..stages.review import ReviewRequired, decide
 
     ws = _ws(p.workspace)
+    out = Path(p.out).expanduser().resolve()
+    check_output_path(out, ws.sources)  # before approving: nothing changes on refusal
     if not (ws.review_dir / "review.json").exists():
         raise ValueError("no review yet: call review first")
     decide(ws, True, f"approved by the editor agent: {p.reason}")
-    out = Path(p.out).expanduser()
-    out.parent.mkdir(parents=True, exist_ok=True)
     try:
         res = render(ws, out=out, encoder=p.encoder, quality="draft" if p.draft else "high",
                      require_review=True)
@@ -708,13 +739,11 @@ class MediaGetP(WsP):
 def media_get(ctx: Context, p: MediaGetP) -> dict:
     """Download a search result (credit recorded). Video is registered as a source clip
     so it can be used with add_clip or as an overlay."""
-    from ..media.library import fetch, last_search
+    from ..media.library import fetch, find_result
     from ..stages.cutaways import _register
 
     ws = _ws(p.workspace)
-    hit = next((r for r in last_search(ws).results if r.result_id == p.result_id), None)
-    if hit is None:
-        raise KeyError(f"{p.result_id} is not in the last media_search")
+    hit = find_result(ws, p.result_id)  # any earlier search, not only the last
     path = fetch(ws, hit, library=Path(p.library) if p.library else None)
     out = {"file": str(path), "license": hit.license, "credit": hit.attribution}
     if hit.kind == "video":
@@ -723,6 +752,23 @@ def media_get(ctx: Context, p: MediaGetP) -> dict:
         Workspace.write(ws.clips_manifest, manifest)
         out["source_clip_id"] = info.clip_id
     return out
+
+
+class JobStatusP(WsP):
+    job_id: str
+    wait_seconds: float = Field(30, ge=0, le=jobs.MAX_WAIT,
+                                description="wait up to this long for the job to finish")
+
+
+@tool("job_status", "check", JobStatusP)
+def job_status(ctx: Context, p: JobStatusP) -> dict:
+    """Progress or result of a long tool (analyze, review, render) that returned a
+    job_id. Waits up to wait_seconds; returns the tool's result once it is done."""
+    ws = _ws(p.workspace)
+    job = jobs.wait_for(ws.root, p.job_id, p.wait_seconds)
+    if job["status"] == "done" and ctx.privacy == "stills":
+        ctx.images_out = job.get("images", [])
+    return jobs.summary(job)
 
 
 # =============================================================================== profile

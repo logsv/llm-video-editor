@@ -129,7 +129,10 @@ def machine_record() -> dict:
 
 def mcp_config(repo: Path, privacy: str | None = None) -> dict:
     """`.mcp.json` content that starts this tool server for Claude Code / `claude -p`."""
-    args = ["run", "--project", str(repo), "--extra", "agent", "llmve", "mcp"]
+    # --directory: run from the repo, so `python -m` imports the package from it even if
+    # the editable-install .pth is skipped (macOS hidden flag on .venv files)
+    args = ["--directory", str(repo), "run", "--extra", "agent",
+            "python", "-m", "llm_video_editor", "mcp"]
     if privacy:
         args += ["--privacy", privacy]
     server: dict = {"command": "uv", "args": args}

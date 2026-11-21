@@ -23,7 +23,8 @@ INSTRUCTIONS = (
     "then analyze, overview, transcript and frames to understand the footage. Build the "
     "edit with new_edit and batch/add_clip, refine with the other edit tools (always "
     "give a reason), check with audit and review, then render and publish. Every change "
-    "is a version; undo restores any earlier one."
+    "is a version; undo restores any earlier one. analyze, review and render can take "
+    "minutes: when they return a job_id, call job_status until it is done."
 )
 
 

@@ -387,12 +387,13 @@ def media_get_cmd(
     library: Path | None = typer.Option(None, help="B-roll folder for video (default: <ws>/media/broll)"),
 ) -> None:
     """Download one search result and record its credit."""
-    from ..media.library import fetch, last_search
+    from ..media.library import fetch, find_result
 
     ws = Workspace.load(workspace)
-    hit = next((r for r in last_search(ws).results if r.result_id == result_id), None)
-    if hit is None:
-        raise typer.BadParameter(f"{result_id} is not in the last search")
+    try:
+        hit = find_result(ws, result_id)
+    except KeyError as e:
+        raise typer.BadParameter(str(e).strip("'\"")) from e
     path = fetch(ws, hit, library=library)
     console.print(f"{path}\n  {hit.license}; credit: {hit.attribution or '(not required)'}")
     if hit.kind == "video":
@@ -801,7 +802,7 @@ def mcp_cmd(
     from ..agent.mcp_server import serve
     from ..agent.tools import Context
 
-    serve(Context(privacy=_privacy(privacy), home=home))
+    serve(Context(privacy=_privacy(privacy), home=home, jobs="process"))
 
 
 @app.command("setup")

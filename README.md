@@ -374,6 +374,16 @@ uv run llmve tool open_project '{"inputs": ["~/Videos/trip"], "first": 15}'
   `agent_log.jsonl`, `decisions.md`); `undo` restores any earlier version, and hand edits
   of `edl_raw.json` are recorded rather than overwritten.
 - `audit` reports problems with suggested fixes and changes nothing; the agent decides.
+- `analyze`, `review` and `render` can take many minutes. Over MCP they run as background
+  jobs in their own process: a call answers at once when the work is quick, otherwise it
+  returns a `job_id` and Claude calls `job_status` (up to 55 s per call) until it is done.
+  A crash in a job is reported with its log tail and cannot take the tool server down.
+- `batch` takes each operation's params in the same shape as the standalone tool
+  (`add_item` with a nested `fields` object, or flat).
+- `media_get` downloads any result from any earlier `media_search` in the workspace.
+- Renders must go outside the footage folder (`~/Videos/trip - edit/trip.mp4`, not
+  `~/Videos/trip/edit/trip.mp4`), so a later scan of the folder never picks them up.
+  Folder scans also skip `.llmve` workspaces and earlier renders (`<video>.llmve.json`).
 - `first` works on only the first N clips (by name or recording time) for quick tests.
 - Footage facts are reported up front: HDR/10-bit, variable or high frame rate,
   rotation, missing or mono audio, action-cam recordings split across files, device,
@@ -464,11 +474,13 @@ Everything for one batch of inputs lives in `.llmve/<batch_hash>/` (set
 | `cut_audit.json`, `edl_audited.json` | cut-audit | what was fixed, and the cut that renders |
 | `geometry_map.json` | geometry | face boxes, crop centres, caption positions |
 | `graphics/*.webm` | review / render | cached HyperFrames renders |
-| `media/credits.json`, `media/search.json`, `media/cutaways.json` | media | licences and credit lines, last search, cutaway slots |
+| `media/credits.json`, `media/search.json`, `media/search_results.json`, `media/cutaways.json` | media | licences and credit lines, last search, every result seen, cutaway slots |
 | `media/*.mp3`, `media/broll/*` (+ `.json` sidecars) | media get / fetch | downloaded music, SFX and stock clips |
 | `review/sheet_*.png`, `review/review.json` | review | the preview and its approval state |
 | `render/qc_report.json` | render | QC: duration, A/V offset, loudness, chapter warnings |
 | `manifest.json` | every stage | per stage: cache key, outputs, completion time |
+| `jobs/<job_id>.json`, `.log` | agent tools over MCP | background jobs (analyze, review, render): status, result, log |
+| `<video>.llmve.json` (next to the render) | render | marks the file as an llmve render (folder scans skip it) |
 
 The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
 `broll_index.md`, `.llmve_broll/`).
@@ -508,6 +520,10 @@ The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
 | The video is much shorter than the target | most footage has no speech; see [Limitations](#limitations). Narrate over silent clips (`llmve music add ... --role voiceover`) or keep it shorter |
 | Claude (cloud session) cannot find my video folder | run on the computer that has the files (see [Run it where your footage is](#run-it-where-your-footage-is-macos-example)) or share the folder through Remote Control |
 | First run is slow before anything happens | the speech model downloads once (about 1.5 GB); long recordings are transcribed in parallel chunks |
+| `llmve` fails with `ModuleNotFoundError: No module named 'llm_video_editor'` (macOS) | macOS marked uv's editable-install `.pth` file hidden, and Python 3.12+ skips hidden `.pth` files. Run `chflags -R nohidden .venv`, or use `uv run python -m llm_video_editor ...` (what `.mcp.json` does) |
+| Claude's MCP call to `review` / `render` ends with "Connection closed" | update to a version with background jobs (`job_status`); the work continues in its own process. Check `<ws>/jobs/*.log`; meanwhile `uv run llmve tool review '{"workspace": "..."}'` runs it from the terminal |
+| `render` refuses: "inside the footage folder" | save the video beside the footage folder, not inside it (scans of that folder would pick it up as a clip) |
+| A tool says "is not a workspace" or ffmpeg cannot find files with a relative path | workspace paths are now made absolute; pass the path `open_project` returned |
 | Non-English speech transcribed badly | `--asr-model large-v3-turbo --language <code>` (the default model is English-only) |
 
 ## Programmatic use

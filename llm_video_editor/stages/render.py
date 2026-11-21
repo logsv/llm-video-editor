@@ -9,6 +9,7 @@ happen in the final pass.
 
 from __future__ import annotations
 
+import json
 import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -49,7 +50,7 @@ from ..ffmpeg.loudnorm import (
 from ..ffmpeg.probe import probe
 from ..ffmpeg.runner import ffmpeg, ffprobe_json
 from ..schemas import EDL, ClipsManifest, RenderQC, Transcript
-from ..workspace import Workspace
+from ..workspace import Workspace, check_output_path
 from .captions import write_captions, write_srt
 from .chapters import chapter_marks, chapter_warnings, description_block, ffmetadata
 
@@ -191,7 +192,9 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
     manifest = Workspace.read(ws.clips_manifest, ClipsManifest)
     work = ws.render_dir
     work.mkdir(parents=True, exist_ok=True)
-    out = out or work / f"{edl.target_platform}.mp4"
+    out = (out or work / f"{edl.target_platform}.mp4").expanduser().resolve()
+    check_output_path(out, ws.sources)
+    out.parent.mkdir(parents=True, exist_ok=True)
     enc = detect_encoder(encoder)
 
     segs, starts = timeline(edl, manifest)
@@ -255,6 +258,10 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
                                "chapters": [(t, title) for t, title in marks],
                                "captions_srt": str(srt) if srt else None})
     Workspace.write(work / "qc_report.json", qc)
+    # marks the file as an llmve render, so folder scans never ingest it as footage
+    out.with_suffix(".llmve.json").write_text(json.dumps(
+        {"rendered_by": "llmve", "workspace": str(ws.root), "duration": qc.duration,
+         "passed": qc.passed}, indent=2), encoding="utf-8")
     for p in mezz or []:
         p.unlink(missing_ok=True)
     ws.record("render", ws.stage_key("render", edl.model_dump(), enc, quality),
