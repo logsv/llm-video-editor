@@ -58,6 +58,8 @@ class _Thumb(Strict):
 
 
 class _Copy(Strict):
+    """Upload copy; written by the planner, or by the editor agent in agent mode."""
+
     titles: list[str] = Field(description="3 options, best first, <= 60 characters each")
     hook: str = Field(description="first two description lines, <= 150 characters")
     body: str = Field(description="2-4 short paragraphs separated by blank lines")
@@ -183,9 +185,11 @@ def build_description(copy: _Copy, chapters: list[tuple[float, str]], credits: l
 
 
 # -- stage --------------------------------------------------------------------------------
-def publish(ws: Workspace, provider: Provider, *, video: Path | None = None, brief: str = "",
-            geocode: bool = False, use_location: bool = False, thumbnails: bool = True,
-            accent: str = "#FFD400", prefer_hyperframes: bool = True) -> UploadPackage:
+def publish(ws: Workspace, provider: Provider | None, *, video: Path | None = None,
+            brief: str = "", geocode: bool = False, use_location: bool = False,
+            thumbnails: bool = True, accent: str = "#FFD400", prefer_hyperframes: bool = True,
+            copy: _Copy | None = None) -> UploadPackage:
+    """``copy`` given (agent mode: the agent wrote it): no LLM call; limits still enforced."""
     from .render import timeline
 
     edl = Workspace.read(ws.edl_audited, EDL)
@@ -219,7 +223,10 @@ def publish(ws: Workspace, provider: Provider, *, video: Path | None = None, bri
         + ("CHAPTERS:\n" + description_block(chapters) if chapters else "")
         + "\nTRANSCRIPT OF THE EDIT (pick thumbnail moments by clip id and #segment id):\n"
         + (_fit(lines) or "(no speech)"))
-    copy = structured(provider, SYSTEM, prompt, _Copy)
+    if copy is None:
+        if provider is None:
+            raise ValueError("publish needs either copy (written by the agent) or a provider")
+        copy = structured(provider, SYSTEM, prompt, _Copy)
 
     titles = fix_titles(copy.titles, warnings)
     hashtags = fix_hashtags(copy.hashtags)
@@ -335,3 +342,7 @@ def upload_markdown(p: UploadPackage, credits: list[Credit]) -> str:
     if p.pinned_comment:
         rows += ["## Pinned comment", "", p.pinned_comment, ""]
     return "\n".join(rows)
+
+
+UploadCopy = _Copy  # public name for agent mode
+UploadThumbnail = _Thumb

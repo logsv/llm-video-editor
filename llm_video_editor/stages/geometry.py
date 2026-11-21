@@ -250,14 +250,22 @@ def place_clips(edl: EDL, manifest: ClipsManifest, geos: dict[str, ClipGeometry]
 
 
 def apply_geometry(edl: EDL, gmap: GeometryMap | None) -> EDL:
-    """Copy crop centres, caption positions and PiP corners onto the EDL."""
+    """Copy crop centres, caption positions and PiP corners onto the EDL.
+
+    A crop centre or caption position already set on a clip (the editor agent's
+    choice) is kept; detection only fills what was left open.
+    """
     if gmap is None or gmap.edl_hash != edl_hash(edl):
         return edl
     clips = []
     for c in edl.clips:
         p = gmap.placement(c.clip_id)
-        clips.append(c.model_copy(update={"crop_center": p.crop_center,
-                                          "caption_position": p.caption_position}) if p else c)
+        if p is None:
+            clips.append(c)
+            continue
+        clips.append(c.model_copy(update={
+            "crop_center": c.crop_center if c.crop_center is not None else p.crop_center,
+            "caption_position": c.caption_position or p.caption_position}))
     overlays = []
     for ov in edl.overlays:
         p = gmap.placement(ov.anchor_clip_id)

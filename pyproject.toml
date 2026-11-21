@@ -60,6 +60,8 @@ gen = [
 # Secondary planner providers (the default `claude-cli` provider needs no Python SDK).
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.40"]
+# Agent mode: the editor agent's tools served over MCP (`llmve mcp`).
+agent = ["mcp>=2.3,<3"]
 # LangGraph orchestration with a human-in-the-loop interrupt at the review gate.
 graph = ["langgraph>=0.2.34"]
 dev = [

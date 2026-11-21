@@ -19,6 +19,23 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
 - Local Python API / a future frontend: build on `stages.auto.auto_edit` and
   `finish_edit` (same options as the CLI); keep them free of CLI concerns.
 
+## Agent mode (in progress: docs/agent-mode-plan.md)
+- The agent is the editor; `llm_video_editor/agent/` holds its instruments. Tools execute,
+  validate and report; they never make editorial choices. Do not add rules that decide
+  for the agent: expose parameters and put advice in skills instead.
+- `agent/tools.py`: the tool registry (open_project with `first` N clips, analyze,
+  overview, transcript, speech_map, frames, edit_state, history, edit ops, batch, undo,
+  audit (report only), review, render, publish, media, profile, remember). Every edit
+  tool needs a `reason`; every edit is a version (`agent/edits.py`, `<ws>/edits/`) and is
+  logged in `agent_log.jsonl` + `decisions.md`.
+- `agent/mcp_server.py` serves the registry over MCP (`llmve mcp`, project `.mcp.json`);
+  `llmve tool <name> '<json>'` calls one tool from the terminal.
+- Privacy: `stills` (requested frames/sheets/thumbnails may go to the model) or
+  `text-only`; video files are never sent. Set by the user (`llmve profile --set
+  privacy=...`), never by the agent.
+- Cut-audit has an agent mode (`AuditConfig(editorial_fixes=False)`): editorial issues are
+  reported as suggestions; only guardrails (unknown source, out of bounds) are applied.
+
 ## Pipeline (each stage = one tested module + one CLI command)
 `watch` → `plan` → `b-roll-select` → (graphics, media) → `cut-audit` → `take-geometry` →
 `review-gate` → `render` → `publish`; `auto` runs all of them, `finish` the part from cut-audit on.
@@ -60,7 +77,7 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
 
 ## Development
 ```bash
-uv sync --extra dev --extra vision   # MediaPipe needs libegl1 on Linux
+uv sync --extra dev --extra vision --extra agent   # MediaPipe needs libegl1 on Linux
 uv run ruff check .
 uv run pytest                        # synthetic media; ASR/LLM/detector are faked
 uv run llmve graphics doctor --install   # optional: enables the real HyperFrames tests
