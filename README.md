@@ -110,6 +110,26 @@ uv run llm-video-router --use-ollama --ollama-model gpt-oss:latest --in ./videos
 llm-video-router --use-ollama --ollama-model llama3.1 --in ./videos --prompt "10min compilation: best moments" --target youtube
 ```
 
+## 🤖 Use with Claude Code (long-form YouTube)
+
+Open this repo in Claude Code and type:
+
+```
+/youtube-edit edit ~/Videos/raw-tutorial.mp4 for YouTube, about 15 minutes
+/youtube-shorts make 3 shorts from ~/Videos/raw-tutorial.mp4
+```
+
+Claude transcribes the recording, reads the **whole** transcript, writes the edit (retakes removed,
+cold open, tightened pauses, chapters), renders a preview, checks every cut, and delivers the MP4,
+`.srt` captions and a chapters block for the description. Notes like "the intro is too long" just
+re-render. The tools can also be run directly:
+
+```bash
+uv run --no-project --with faster-whisper python -m llm_video_editor.longform ingest raw.mp4 projects/demo
+# write projects/demo/edl.json (see .claude/skills/youtube-edit/reference.md)
+uv run --no-project --with faster-whisper python -m llm_video_editor.longform render projects/demo --preview
+```
+
 ## 📋 Requirements
 
 ### System Dependencies

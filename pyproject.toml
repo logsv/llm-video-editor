@@ -81,6 +81,7 @@ all = [
 [project.scripts]
 llm-video-router = "llm_video_editor.cli:main"
 llm-video-editor = "llm_video_editor.cli:main"
+llm-longform = "llm_video_editor.longform.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/your-org/llm-video-editor"

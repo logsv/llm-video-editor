@@ -60,6 +60,15 @@ llm-video-router --in ./videos --prompt "60s reel: top 3 takeaways, captions, up
 - `uv sync` - Sync dependencies with pyproject.toml
 - `uv python list` - List available Python versions
 
+## Claude Code skills (long-form YouTube)
+- `/youtube-edit` (`.claude/skills/youtube-edit/`): raw long recording -> 16:9 YouTube cut, chapters, SRT, -14 LUFS.
+  Claude reads the full transcript and writes `projects/<slug>/edl.json`; `llm_video_editor/longform/` renders it.
+- `/youtube-shorts` (`.claude/skills/youtube-shorts/`): best moments of a long video -> 9:16 clips.
+- Tools: `uv run --no-project --with faster-whisper python -m llm_video_editor.longform {ingest,render}`
+  (only needs ffmpeg + faster-whisper; the rest of the repo's heavy deps are not required).
+- Tests: `python -m pytest tests/test_longform.py -o addopts=""`.
+- `projects/` holds media and renders and is gitignored.
+
 ## Dependencies
 See requirements.txt for full list of dependencies including:
 - langgraph

@@ -171,3 +171,6 @@ edl_test.json
 # Virtual environment variations
 .venv*/
 venv*/
+
+# Claude /youtube-edit projects (raw media, renders)
+projects/
