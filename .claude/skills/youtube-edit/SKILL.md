@@ -6,7 +6,7 @@ description: Edit one long raw recording (talking head, tutorial, podcast, scree
 # /youtube-edit
 
 Long-form specialisation of `edit-video`: same stages, same gates, same rules
-(never open media files, only the user approves the review). Read
+(never open media files; you verify and approve the review sheet yourself). Read
 `.claude/skills/edit-video/SKILL.md` first; this skill adds the editorial
 judgement and the long-form options. See `reference.md` for the EDL fields.
 
@@ -50,7 +50,7 @@ Post a short table (clip, source range, length, chapter) and the runtime.
 ```bash
 uv run llmve cut-audit <ws>        # PASSED, plus "Xs of pauses tightened"
 uv run llmve geometry <ws>
-uv run llmve review <ws>           # stop: show the sheets to the user
+uv run llmve review <ws>           # verify every tile, then: llmve review approve <ws> --notes "auto-verified: ..."
 ```
 Tightening runs inside cut-audit after the sentence fixes, so splits always
 land on word edges. Any edit to `edl_raw.json` means cut-audit, geometry and

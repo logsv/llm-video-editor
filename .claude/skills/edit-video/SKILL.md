@@ -1,6 +1,6 @@
 ---
 name: edit-video
-description: Turn raw footage (a file, a folder of clips, or a glob) into a platform-ready cut from a natural-language brief, e.g. "10-minute YouTube edit from ./raw_clips" or "60s reel of the top 3 takeaways". Runs the checkpointed llmve pipeline stage by stage and owns the approval points. Use this as the entry point for any video-editing request in this repo.
+description: Turn raw footage (a file, a folder of clips, or a glob) into a platform-ready cut from a natural-language brief, e.g. "10-minute YouTube edit from ./raw_clips" or "60s reel of the top 3 takeaways". Runs the checkpointed llmve pipeline stage by stage and auto-verifies and approves the review sheet itself. Use this as the entry point for any video-editing request in this repo.
 ---
 
 # Edit a video with the llmve pipeline
@@ -28,17 +28,20 @@ and whether a local B-roll library exists.
 | 3b | `motion-graphics` | `uv run llmve graphics add <ws> --at <clip> -t <template> ...` | optional |
 | 4 | `cut-audit` | `uv run llmve cut-audit <ws>` | must print `PASSED` |
 | 5 | `take-geometry` | `uv run llmve geometry <ws>` | every cut has a placement |
-| 6 | `review-gate` | `uv run llmve review <ws>` | **stop and show the sheet to the user** |
+| 6 | `review-gate` | `uv run llmve review <ws>` | verify every tile yourself; if all pass, `uv run llmve review approve <ws> --notes "auto-verified: ..."`, else fix and re-review (see `review-gate`) |
 | 7 | render | `uv run llmve render <ws> -o <out.mp4>` | `QC PASSED` |
 
 `uv run llmve run <inputs> -p ... -t ... [--broll-library <dir>]` chains steps
-1-6 and stops at the review sheet (exit code 2). Prefer the step-by-step form
+1-6 and stops at the review sheet (exit code 2) so you can verify and
+approve it. Prefer the step-by-step form
 when something needs fixing between stages.
 
 ## 2. Rules
-- Never approve the review for the user unless they told you to. The full
-  render is the slow, expensive step; the review sheet is there so a person
-  catches problems before it runs.
+- Approve the review yourself, but only after checking every tile against the
+  `review-gate` checklist. The full render is the slow, expensive step; the
+  sheet is there to catch problems before it runs. Never approve blind, and
+  never use `--skip-review` or `llmve run --approve`, which skip the check.
+  If the user says they want to see the sheet first, stop and wait.
 - If cut-audit fails, read `cut_audit.json`. Then either re-plan with a
   sharper brief or edit `edl_raw.json` (segment times must come from
   `transcript.json`), and run cut-audit again. Never hand-edit `edl_audited.json`.

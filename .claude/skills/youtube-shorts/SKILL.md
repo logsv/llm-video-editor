@@ -30,7 +30,8 @@ not; a later punchy line moved to the front is a valid hook) and set
 ```bash
 uv run llmve cut-audit <ws>
 uv run llmve geometry <ws>        # face-tracked 9:16 crop and caption band
-uv run llmve review <ws>          # stop: show the sheet to the user
+uv run llmve review <ws>          # verify every tile (review-gate), then:
+uv run llmve review approve <ws> --notes "auto-verified: ..."
 uv run llmve render <ws> -o shorts/<n>-<name>.mp4
 ```
 Screen-share segments rarely survive a 9:16 crop: avoid them or say so.

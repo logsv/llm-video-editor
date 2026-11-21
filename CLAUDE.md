@@ -27,7 +27,10 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
   descriptions). `llm.base.assert_text_only` enforces it; keep it that way.
 - The LLM never invents timestamps: it selects segment ids, resolved locally.
 - Run ffmpeg through `llm_video_editor.ffmpeg.runner` (argv lists, never `shell=True`).
-- Do not approve a review or pass `--skip-review` / `--approve` unless the user asked.
+- Review gate: Claude verifies every review tile itself and approves with
+  `llmve review approve --notes "auto-verified: ..."` when all checks pass (fix and
+  re-review otherwise; see `review-gate`). Never pass `--skip-review` / `--approve`,
+  and stop for the user only if they ask to see the sheet.
 - Checkpoint schema changes: bump nothing silently; update the model, its tests
   and `llmve schema` output together.
 

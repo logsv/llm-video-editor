@@ -52,5 +52,5 @@ Never use real people's names, logos or likenesses the user didn't provide.
 `uv run llmve cut-audit <ws>` (drops graphics with a missing anchor or template,
 keeps them inside the cut, follows jump-cut tightening), `uv run llmve review <ws>`,
 check the `gNNN over cNNN` tiles: nothing covers the face box or the
-captions, text is readable at tile size. `uv run llmve graphics render <ws>`
+captions, text is readable at tile size; then approve as in `review-gate`. `uv run llmve graphics render <ws>`
 pre-renders them if you want to check the files first.

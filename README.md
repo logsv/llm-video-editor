@@ -4,7 +4,7 @@ Prompt-driven video editing for YouTube (16:9) and Shorts/Reels/TikTok (9:16).
 Point it at a clip or a folder of raw footage and describe the cut you want. It
 transcribes, plans and audits the cut, keeps captions and overlays off the
 speaker's face, adds chapters, jump-cut pacing and motion graphics when you ask,
-shows you a preview sheet to approve, and then renders once, normalised to
+checks a preview sheet of every cut, and then renders once, normalised to
 -14 LUFS.
 
 ![LLM Video Editor Workflow](assets/video_editor_workflow.gif)
@@ -20,8 +20,10 @@ shows you a preview sheet to approve, and then renders once, normalised to
 /motion-graphics add a lower third with my name and a title card per chapter
 ```
 
-Claude runs the stages below, stops at the review sheet for your approval, and
-then renders. It never approves the review for you unless you tell it to.
+Claude runs the stages below, checks every tile of the review sheet itself
+(face in frame, captions off the face, overlays and graphics placed correctly),
+fixes and re-reviews anything that fails, approves the sheet and renders. Say
+"let me check the review first" if you want to approve it yourself.
 
 **From the terminal:**
 
@@ -261,7 +263,8 @@ which tested `llmve` command to run and how to read its checkpoint.
 | `/motion-graphics` | lower thirds, chapter cards, callouts, custom HyperFrames compositions |
 | `/watch`, `/cut-audit`, `/take-geometry`, `/b-roll-select`, `/review-gate` | one stage on its own |
 
-Claude never approves the review sheet for you unless you tell it to.
+Claude checks the review sheet itself and approves it only when every tile
+passes; ask it to wait if you want to look first.
 `.claude/settings.json` denies reads of raw video/audio, so agents work only
 from JSON checkpoints and contact sheets.
 
