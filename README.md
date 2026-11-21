@@ -353,6 +353,34 @@ uv run llmve publish .llmve/<batch_hash> --brief "budget audio gear for beginner
   to OpenStreetMap for a place name; `--use-location` lets the copy mention it.
   Both are off by default.
 
+### Agent mode (phase 0: tools for an editor agent)
+Agent mode makes Claude the editor: it decides every cut, setting and creative choice,
+and the code only executes, validates and records. Phase 0 provides the tools; a
+one-command agent run comes in a later phase (see
+[docs/agent-mode-plan.md](docs/agent-mode-plan.md)).
+
+```bash
+uv sync --extra agent                       # MCP server dependency
+uv run llmve setup                          # what this machine can do
+uv run llmve profile --set channel="Solo Rides" --set languages=en,hi --dislike "film grain"
+uv run llmve tools                          # the agent's tools
+uv run llmve tool open_project '{"inputs": ["~/Videos/trip"], "first": 15}'
+```
+
+- Open the repo in Claude Code: the project `.mcp.json` offers the `llmve` tool server,
+  so Claude edits by calling tools (`open_project`, `analyze`, `transcript`, `frames`,
+  `batch`, `trim_clip`, `set_pacing`, `add_item`, `audit`, `review`, `render`, `publish`, ...).
+- Every edit is a numbered version with the agent's reason (`<ws>/edits/`,
+  `agent_log.jsonl`, `decisions.md`); `undo` restores any earlier version, and hand edits
+  of `edl_raw.json` are recorded rather than overwritten.
+- `audit` reports problems with suggested fixes and changes nothing; the agent decides.
+- `first` works on only the first N clips (by name or recording time) for quick tests.
+- Footage facts are reported up front: HDR/10-bit, variable or high frame rate,
+  rotation, missing or mono audio, action-cam recordings split across files, device,
+  time and GPS.
+- Privacy: `stills` (default; frames the agent asks for go to the model) or `text-only`
+  (`llmve profile --set privacy=text-only`). Video files are never uploaded.
+
 ## Command reference
 
 `<ws>` is the workspace directory `llmve watch` prints (`.llmve/<batch_hash>`).
@@ -380,6 +408,11 @@ Every command has `--help`.
 | `llmve review approve <ws>` / `reject <ws>` | record the decision | `--notes "..."` |
 | `llmve render <ws>` | one encode, -14 LUFS, QC, SRT, chapters, graphics | `-o out.mp4`, `--encoder auto\|h264_nvenc\|h264_videotoolbox\|libx264`, `--draft`, `--no-captions`, `--skip-review` |
 | `llmve publish <ws>` | upload file, tags, three thumbnails next to the video | `--video`, `--brief`, `--geocode`, `--use-location`, `--no-thumbnails`, `--accent`, `--provider` |
+| `llmve setup` | record this machine's capabilities for the agent | |
+| `llmve profile` | show or update your style profile | `--set key=value`, `--like`, `--dislike`, `--forget` |
+| `llmve mcp` | serve the agent's tools over MCP (stdio) | `--privacy stills\|text-only` |
+| `llmve mcp-config` | print a `.mcp.json` for Claude Code / `claude -p` | `--privacy` |
+| `llmve tools` / `llmve tool <name> '<json>'` | list the agent's tools / call one | `--privacy`, `--home` |
 | `llmve run <inputs...> -p "<brief>"` | watch -> plan -> b-roll -> cut-audit -> geometry -> review | all of the above plus `--broll-library`, `--approve` (approve and render) |
 | `llmve schema <name>` | JSON Schema of a checkpoint (`edl`, `transcript`, `qc_report`, ...) | |
 

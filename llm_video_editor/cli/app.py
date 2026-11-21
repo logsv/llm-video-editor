@@ -783,6 +783,108 @@ def finish_cmd(
     console.print(f"[bold]{rep.output}[/bold]" + (f"\nupload file: {rep.upload}" if rep.upload else ""))
 
 
+def _privacy(value: str | None) -> str:
+    from ..agent.setup import load_profile
+
+    privacy = value or load_profile().privacy
+    if privacy not in ("stills", "text-only"):
+        raise typer.BadParameter("--privacy is stills or text-only")
+    return privacy
+
+
+@app.command("mcp")
+def mcp_cmd(
+    privacy: str | None = typer.Option(None, help="stills | text-only (default: profile)"),
+    home: Path | None = HOME,
+) -> None:
+    """Serve the editor agent's tools over MCP (stdio) for Claude Code / `claude -p`."""
+    from ..agent.mcp_server import serve
+    from ..agent.tools import Context
+
+    serve(Context(privacy=_privacy(privacy), home=home))
+
+
+@app.command("setup")
+def agent_setup_cmd() -> None:
+    """Record what this machine can do (ffmpeg, encoders, Node, MCP, Claude CLI, disk)."""
+    from ..agent.setup import config_dir, machine_record
+
+    rec = machine_record()
+    for k, v in rec.items():
+        if k != "warnings":
+            console.print(f"{k}: {v}")
+    for w in rec["warnings"]:
+        console.print(f"[yellow]warning:[/yellow] {w}")
+    console.print(f"saved {config_dir() / 'machine.json'}")
+
+
+@app.command("profile")
+def agent_profile_cmd(
+    set_: list[str] = typer.Option([], "--set", help="key=value (channel, audience, "
+                                   "languages=en,hi, default_look, privacy, footage_dir, output_dir)"),
+    like: list[str] = typer.Option([], "--like"),
+    dislike: list[str] = typer.Option([], "--dislike"),
+    forget: list[str] = typer.Option([], "--forget", help="remove a like/dislike"),
+) -> None:
+    """Show or update your style profile (the agent reads it before every edit)."""
+    from ..agent.setup import profile_path, update_profile
+
+    fields = {}
+    for item in set_:
+        if "=" not in item:
+            raise typer.BadParameter(f"--set expects key=value, got {item!r}")
+        k, v = item.split("=", 1)
+        fields[k.strip()] = [x.strip() for x in v.split(",")] if k.strip() == "languages" else v
+    try:
+        prof = update_profile(set_fields=fields, add_likes=like, add_dislikes=dislike,
+                              remove=forget)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
+    for k, v in prof.model_dump().items():
+        console.print(f"{k}: {v}")
+    console.print(f"({profile_path()})")
+
+
+@app.command("mcp-config")
+def agent_mcp_config_cmd(
+    privacy: str | None = typer.Option(None, help="stills | text-only"),
+) -> None:
+    """Print the .mcp.json that connects Claude Code (or claude -p) to the tools."""
+    from ..agent.setup import mcp_config
+
+    repo = Path(__file__).resolve().parents[2]
+    typer.echo(json.dumps(mcp_config(repo, privacy), indent=2))
+
+
+@app.command("tools")
+def agent_tools_cmd() -> None:
+    """List the agent's tools."""
+    from ..agent.tools import REGISTRY
+
+    for t in REGISTRY.values():
+        console.print(f"[bold]{t.name}[/bold] ({t.kind}): {' '.join(t.description.split())}")
+
+
+@app.command("tool")
+def agent_call_cmd(
+    name: str = typer.Argument(..., help="tool name"),
+    args: str = typer.Argument("{}", help="JSON arguments"),
+    privacy: str | None = typer.Option(None, help="stills | text-only"),
+    home: Path | None = HOME,
+) -> None:
+    """Call one tool from the terminal (JSON in, JSON out) - same tools as over MCP."""
+    from ..agent.tools import Context, call
+
+    try:
+        parsed = json.loads(args)
+    except json.JSONDecodeError as e:
+        raise typer.BadParameter(f"args must be JSON: {e}") from e
+    res = call(name, parsed, Context(privacy=_privacy(privacy), home=home))
+    typer.echo(json.dumps(res, indent=2, default=str))
+    if "error" in res:
+        raise typer.Exit(1)
+
+
 @app.command("run")
 def run_cmd(
     inputs: list[str] = typer.Argument(..., help="Video file(s), folder(s) or glob(s)"),

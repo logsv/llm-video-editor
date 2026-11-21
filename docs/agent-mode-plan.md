@@ -1,6 +1,6 @@
 # Agent mode: plan
 
-Status: plan only, nothing implemented. Branch `claude/agent-mode-plan`.
+Status: P0 (foundation) implemented on branch `claude/agent-mode`; P1-P5 to do.
 
 ## Goal
 

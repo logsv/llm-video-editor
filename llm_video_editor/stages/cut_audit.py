@@ -39,6 +39,10 @@ class AuditConfig:
     max_extend: float = 2.5  # how far a cut may grow to reach a sentence end
     min_clip: float = 0.6
     tolerance: float = 0.05  # duration budget, fraction of target
+    # False (agent mode): editorial issues (word/sentence snapping, overlaps, short
+    # clips, duration budget) are reported with a suggested fix and left for the agent
+    # to decide; correctness guardrails (unknown source, out of bounds) still apply.
+    editorial_fixes: bool = True
 
 
 def ends_sentence(word: Word) -> bool:
@@ -114,6 +118,12 @@ def _snap(clip: EDLClip, words: list[Word], duration: float, cfg: AuditConfig,
     return EDLClip(**{**clip.model_dump(), "start": round(s, 3), "end": round(e, 3)})
 
 
+def _as_suggestion(v: Violation) -> Violation:
+    """A fix the classic audit would apply, reported instead (agent mode)."""
+    fix = f"suggested: {v.fix}" if v.fix else None
+    return v.model_copy(update={"fixed": False, "fix": fix, "severity": "warning"})
+
+
 def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
           cfg: AuditConfig = AuditConfig()) -> tuple[EDL, CutAudit]:
     rec = _Recorder()
@@ -139,9 +149,16 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
             clip = EDLClip(**{**clip.model_dump(), "start": ns, "end": ne})
         ct = transcript.for_clip(clip.source_clip_id)
         words = ct.words() if ct and clip.role == "a_roll" else []
-        snapped = _snap(clip, words, info.duration, cfg, rec)
-        if snapped is not None:
-            clips.append(snapped)
+        if cfg.editorial_fixes:
+            snapped = _snap(clip, words, info.duration, cfg, rec)
+            if snapped is not None:
+                clips.append(snapped)
+        else:
+            scratch = _Recorder()
+            _snap(clip, words, info.duration, cfg, scratch)
+            for v in scratch.items:
+                rec.items.append(_as_suggestion(v))
+            clips.append(clip)
 
     # -- overlaps between cuts from the same source ---------------------------------
     merged: list[EDLClip] = []
@@ -149,6 +166,11 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
         prev = merged[-1] if merged else None
         if (prev and prev.source_clip_id == clip.source_clip_id and clip.start >= prev.start
                 and clip.start < prev.end and clip.end > prev.start):  # forward continuation
+            if not cfg.editorial_fixes:
+                rec.add("overlap", clip, f"overlaps {prev.clip_id} in the source", at=clip.start,
+                        severity="warning", fix=f"suggested: merge into {prev.clip_id}")
+                merged.append(clip)
+                continue
             rec.add("overlap", clip, f"overlaps {prev.clip_id} in the source", at=clip.start,
                     fixed=True, fix=f"merged into {prev.clip_id}")
             merged[-1] = EDLClip(**{**prev.model_dump(), "start": min(prev.start, clip.start),
@@ -164,6 +186,11 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
                 continue
             if (other.source_clip_id == clip.source_clip_id
                     and clip.start < other.end and clip.end > other.start):
+                if not cfg.editorial_fixes:
+                    rec.add("overlap", clip, f"repeats source material from {other.clip_id}",
+                            at=clip.start, severity="warning",
+                            fix=f"suggested: start at {other.end:.3f}s")
+                    continue
                 rec.add("overlap", clip, f"repeats source material from {other.clip_id}",
                         at=clip.start, fixed=True, fix=f"start moved to {other.end:.3f}s")
                 clip = EDLClip(**{**clip.model_dump(), "start": other.end})
@@ -171,9 +198,13 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
 
     kept = []
     for clip in merged:
-        if clip.duration < cfg.min_clip:
+        if clip.duration < cfg.min_clip and cfg.editorial_fixes:
             rec.add("too_short", clip, f"only {clip.duration:.2f}s long", fixed=True,
                     fix="dropped clip")
+        elif clip.duration < cfg.min_clip:
+            rec.add("too_short", clip, f"only {clip.duration:.2f}s long", severity="warning",
+                    fix="suggested: remove it or lengthen it")
+            kept.append(clip)
         else:
             kept.append(clip)
 
@@ -193,7 +224,12 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
     if target:
         total = sum(length(c) for c in kept)
         hi, lo = target * (1 + cfg.tolerance), target * (1 - cfg.tolerance)
-        if total > hi:
+        if total > hi and not cfg.editorial_fixes:
+            rec.add("duration_budget", None,
+                    f"{total:.1f}s is over target {target:.1f}s (+{cfg.tolerance:.0%})",
+                    severity="warning",
+                    fix=f"suggested: remove about {total - target:.0f}s")
+        elif total > hi:
             order = sorted(range(len(kept)), key=lambda i: (-kept[i].priority, -i))
             dropped = set()
             for i in order:
