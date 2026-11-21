@@ -1,0 +1,90 @@
+<!doctype html>
+<!-- llmve thumbnail still. __W__ __H__ __TEXT__ __STYLE__ __ACCENT__ are filled by
+     llm_video_editor.stages.thumbnails; frame.jpg is the chosen video frame. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script src="assets/gsap.min.js"></script>
+<style>
+  html, body { margin: 0; background: #000; }
+  #root { position: relative; width: __W__px; height: __H__px; overflow: hidden;
+          font-family: "Inter Tight", "Arial Black", Impact, "DejaVu Sans", sans-serif; }
+  #bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+        filter: saturate(1.3) contrast(1.12) brightness(1.04); }
+  #vig { position: absolute; inset: 0;
+         background: radial-gradient(ellipse at 60% 45%, transparent 45%, rgba(0,0,0,.55) 100%); }
+  /* #text is a fixed box per style; #t holds the words inline (never split mid-word) */
+  #text { position: absolute; display: flex; flex-direction: column; }
+  #t { font-weight: 900; line-height: 1.0; letter-spacing: -0.01em; text-transform: uppercase;
+       color: #fff; overflow-wrap: normal; word-break: keep-all;
+       -webkit-text-stroke: calc(__H__px * 0.008) #000; paint-order: stroke fill;
+       text-shadow: 0 calc(__H__px * 0.01) calc(__H__px * 0.03) rgba(0,0,0,.6); }
+  #t .hl { color: var(--accent); }
+
+  /* bold: huge words bottom-left over a slightly zoomed shot */
+  .bold #bg { transform: scale(1.12); transform-origin: 65% 40%; }
+  .bold #text { left: 4%; bottom: 6%; width: 64%; height: 50%; justify-content: flex-end; }
+
+  /* question: red highlighter banner per line, top-left; arrow toward the subject */
+  .question #text { left: 3%; top: 5%; width: 66%; height: 34%; justify-content: flex-start; }
+  .question #t { -webkit-text-stroke: 0; line-height: 1.32; }
+  .question #t span.line { background: #e8222b; padding: 0.02em 0.22em;
+                           box-decoration-break: clone; -webkit-box-decoration-break: clone;
+                           border-radius: 0.08em; }
+  .question #arrow { position: absolute; right: 26%; top: 36%; width: 17%; height: 30%; }
+
+  /* reveal: dark panel left with the words, highlight ring on the right */
+  .reveal #panel { position: absolute; inset: 0 50% 0 0;
+                   background: linear-gradient(90deg, rgba(0,0,0,.85), rgba(0,0,0,.55) 75%, transparent); }
+  .reveal #text { left: 4%; top: 12%; width: 42%; height: 76%; justify-content: center; }
+  .reveal #t { color: var(--accent); }
+  .reveal #ring { position: absolute; left: 60%; top: 18%; width: 30%; aspect-ratio: 1;
+                  border: calc(__H__px * 0.012) solid var(--accent); border-radius: 50%;
+                  box-shadow: 0 0 calc(__H__px * 0.04) rgba(0,0,0,.6); }
+
+  /* vertical (Shorts) frames */
+  .portrait.bold #text { left: 5%; width: 90%; height: 32%; }
+  .portrait.question #text { width: 90%; height: 26%; }
+  .portrait.reveal #panel { inset: 55% 0 0 0;
+                            background: linear-gradient(0deg, rgba(0,0,0,.85), transparent); }
+  .portrait.reveal #text { left: 5%; top: auto; bottom: 6%; width: 90%; height: 34%; }
+  .portrait.reveal #ring { left: 25%; top: 14%; width: 50%; }
+</style>
+</head>
+<body>
+<div id="root" class="__STYLE__" data-composition-id="main" data-start="0" data-duration="1"
+     data-width="__W__" data-height="__H__">
+  <img id="bg" src="frame.jpg" alt="">
+  <div id="vig"></div>
+  <div id="panel"></div>
+  <div id="ring"></div>
+  <svg id="arrow" viewBox="0 0 100 100" preserveAspectRatio="none" style="display:none">
+    <path d="M10 10 L70 60 L55 66 L90 95 L95 45 L80 55 L20 2 Z" fill="#FFD400"
+          stroke="#000" stroke-width="3"/>
+  </svg>
+  <div id="text"><div id="t">__TEXT__</div></div>
+</div>
+<script>
+  const root = document.getElementById("root");
+  root.style.setProperty("--accent", "__ACCENT__");
+  if (__H__ > __W__) root.classList.add("portrait");
+  if (root.classList.contains("question")) document.getElementById("arrow").style.display = "";
+  // question style: the words sit in a highlighter banner
+  const t = document.getElementById("t");
+  if (root.classList.contains("question")) t.innerHTML = '<span class="line">' + t.innerHTML + "</span>";
+  // fit: the largest size whose words stay inside the style's box, no word split
+  const box = document.getElementById("text");
+  let size = __H__ * 0.24;
+  const fits = () => t.scrollHeight <= box.clientHeight * 1.01 && t.scrollWidth <= box.clientWidth * 1.01;
+  t.style.fontSize = size + "px";
+  while (size > __H__ * 0.04 && !fits()) {
+    size *= 0.95;
+    t.style.fontSize = size + "px";
+  }
+  const tl = gsap.timeline({ paused: true });
+  tl.set("#text", { opacity: 1 }, 0);
+  window.__timelines = window.__timelines || {};
+  window.__timelines["main"] = tl;
+</script>
+</body>
+</html>

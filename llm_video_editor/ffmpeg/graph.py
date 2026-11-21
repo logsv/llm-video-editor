@@ -47,6 +47,45 @@ class GraphicSpec:
     box: tuple[float, float, float, float] | None = None  # x, y, w, h (0-1); None = full frame
 
 
+@dataclass(frozen=True)
+class MusicSpec:
+    """An audio file placed on the output timeline (music, sfx or voice-over)."""
+
+    path: str
+    at: float  # output seconds
+    duration: float
+    src_start: float = 0.0
+    gain_db: float = -18.0
+    duck: bool = True
+    loop: bool = False
+    fade_in: float = 1.0
+    fade_out: float = 2.0
+    role: str = "music"
+
+
+@dataclass(frozen=True)
+class Ducking:
+    """Sidechain settings. ``key_gain_db`` brings measured speech to KEY_LEVEL_DB."""
+
+    depth_db: float = 12.0
+    attack_ms: float = 20.0
+    release_ms: float = 450.0
+    key_gain_db: float = 0.0
+
+
+KEY_LEVEL_DB = -20.0  # speech level the sidechain key is normalised to
+DUCK_RATIO = 20.0
+
+
+def duck_filter(d: Ducking) -> str:
+    """``sidechaincompress`` whose threshold yields ``depth_db`` of gain reduction for
+    speech at KEY_LEVEL_DB: reduction = (level - threshold) * (1 - 1/ratio)."""
+    thr_db = KEY_LEVEL_DB - d.depth_db / (1 - 1 / DUCK_RATIO)
+    thr = min(1.0, max(0.000976563, 10 ** (thr_db / 20)))
+    return (f"sidechaincompress=threshold={thr:.6f}:ratio={DUCK_RATIO:g}:attack={d.attack_ms:g}:"
+            f"release={d.release_ms:g}:makeup=1:detection=rms")
+
+
 PIP_SIZE = 0.4
 PIP_MARGIN = 0.04
 
@@ -175,3 +214,64 @@ def add_graphics(g: Graph, base: str, graphics: list[GraphicSpec], *, width: int
                          f"enable='between(t,{gr.at:.6f},{end - 1e-4:.6f})'[vg{k}]")
         base = f"vg{k}"
     return base
+
+
+def _track_chain(g: Graph, t: MusicSpec, total: float) -> str:
+    loop = ("-stream_loop", "-1") if t.loop else ()
+    idx = g.add_input(*loop, "-ss", f"{t.src_start:.6f}", "-i", t.path)
+    fi, fo = min(t.fade_in, t.duration / 2), min(t.fade_out, t.duration / 2)
+    chain = (f"[{idx}:a:0]aresample=48000,{AUDIO_FMT},atrim=duration={t.duration:.6f},"
+             f"asetpts=PTS-STARTPTS")
+    if fi > 0:
+        chain += f",afade=t=in:d={fi:.3f}"
+    if fo > 0:
+        chain += f",afade=t=out:st={t.duration - fo:.6f}:d={fo:.3f}"
+    return chain + (f",volume={t.gain_db:.2f}dB,adelay=delays={round(t.at * 1000)}:all=1,"
+                    f"apad=whole_dur={total:.6f}")
+
+
+def add_speech(g: Graph, voice: str, tracks: list[MusicSpec], *, total: float) -> str:
+    """The speech bus: the clips' own audio plus every voice-over track."""
+    vos = [t for t in tracks if t.role == "voiceover"]
+    if not vos:
+        return voice
+    labels = [voice]
+    for i, t in enumerate(vos):
+        g.filters.append(_track_chain(g, t, total) + f"[vo{i}]")
+        labels.append(f"vo{i}")
+    g.filters.append("".join(f"[{x}]" for x in labels)
+                     + f"amix=inputs={len(labels)}:duration=first:normalize=0[speech]")
+    return "speech"
+
+
+def add_music(g: Graph, voice: str, tracks: list[MusicSpec], *, total: float,
+              ducking: Ducking = Ducking()) -> str:
+    """Speech bus + music/SFX; ducked tracks dip under the speech bus.
+
+    The sidechain key is the speech bus raised by ``ducking.key_gain_db`` (from a
+    loudness measurement of the speech), so the dip depends on whether someone is
+    talking, not on how loud the recording happens to be.
+    """
+    speech = add_speech(g, voice, tracks, total=total)
+    beds = [t for t in tracks if t.role != "voiceover"]
+    if not beds:
+        return speech
+    ducked = [i for i, t in enumerate(beds) if t.duck]
+    if ducked:
+        g.filters.append(f"[{speech}]asplit=2[mixv][keyraw]")
+        g.filters.append(f"[keyraw]volume={ducking.key_gain_db:.2f}dB,"
+                         f"asplit={len(ducked)}" + "".join(f"[sc{i}]" for i in ducked))
+    else:
+        g.filters.append(f"[{speech}]anull[mixv]")
+    labels = ["mixv"]
+    for i, t in enumerate(beds):
+        chain = _track_chain(g, t, total)
+        if t.duck:
+            g.filters.append(chain + f"[mraw{i}]")
+            g.filters.append(f"[mraw{i}][sc{i}]{duck_filter(ducking)}[m{i}]")
+        else:
+            g.filters.append(chain + f"[m{i}]")
+        labels.append(f"m{i}")
+    g.filters.append("".join(f"[{x}]" for x in labels)
+                     + f"amix=inputs={len(labels)}:duration=first:normalize=0[amixed]")
+    return "amixed"

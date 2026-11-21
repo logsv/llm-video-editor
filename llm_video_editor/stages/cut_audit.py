@@ -21,6 +21,7 @@ from ..schemas import (
     CutAudit,
     EDLClip,
     Graphic,
+    MusicTrack,
     Transcript,
     Violation,
     Word,
@@ -203,8 +204,8 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
 
     # -- pacing (after the editorial fixes, so splits land inside audited clips) -----
     words_for = {ct.clip_id: ct.words() for ct in transcript.clips}
-    kept, paced_overlays, paced_graphics, removed = apply_pacing(
-        edl, kept, words_for, list(edl.overlays), list(edl.graphics))
+    kept, paced_overlays, paced_graphics, paced_music, removed = apply_pacing(
+        edl, kept, words_for, list(edl.overlays), list(edl.graphics), list(edl.music))
 
     # -- overlays ---------------------------------------------------------------------
     by_id = {c.clip_id: c for c in kept}
@@ -230,7 +231,9 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
             "offset": round(offset, 3), "duration": round(dur, 3), "src_start": round(src_start, 3)}))
 
     graphics = _audit_graphics(paced_graphics, kept, rec)
-    audited = edl.model_copy(update={"clips": kept, "overlays": overlays, "graphics": graphics})
+    music = _audit_music(paced_music, kept, rec)
+    audited = edl.model_copy(update={"clips": kept, "overlays": overlays, "graphics": graphics,
+                                     "music": music})
     report = CutAudit(
         passed=not any(v.severity == "error" and not v.fixed for v in rec.items),
         violations=rec.items, clips_before=before_n, clips_after=len(kept),
@@ -278,6 +281,39 @@ def _audit_graphics(graphics: list[Graphic], clips: list[EDLClip], rec: _Recorde
                     fix=f"{dur:.2f}s from {at:.2f}s")
         out.append(g.model_copy(update={"offset": round(max(0.0, g.offset), 3),
                                         "duration": round(dur, 3)}))
+    return out
+
+
+def _audit_music(tracks: list[MusicTrack], clips: list[EDLClip], rec: _Recorder
+                 ) -> list[MusicTrack]:
+    """Drop tracks with a missing file or anchor; keep each inside the timeline."""
+    starts, t = {}, 0.0
+    for c in clips:
+        starts[c.clip_id] = t
+        t += c.duration
+    total, out = t, []
+    for m in tracks:
+        if not Path(m.file).expanduser().exists():
+            rec.add("unknown_music", None, f"music {m.track_id}: {m.file} does not exist",
+                    fixed=True, fix="dropped track")
+            continue
+        if m.anchor_clip_id not in starts:
+            rec.add("music_out_of_bounds", None,
+                    f"music {m.track_id}: anchor {m.anchor_clip_id} is not in the cut",
+                    fixed=True, fix="dropped track")
+            continue
+        at = starts[m.anchor_clip_id] + max(0.0, m.offset)
+        room = total - at
+        if room < 0.3:
+            rec.add("music_out_of_bounds", None, f"music {m.track_id} starts at the end",
+                    fixed=True, fix="dropped track")
+            continue
+        dur = m.duration
+        if dur is not None and dur > room:
+            rec.add("music_out_of_bounds", None, f"music {m.track_id} ran past the end of the cut",
+                    fixed=True, fix=f"{room:.2f}s from {at:.2f}s")
+            dur = round(room, 3)
+        out.append(m.model_copy(update={"offset": round(max(0.0, m.offset), 3), "duration": dur}))
     return out
 
 

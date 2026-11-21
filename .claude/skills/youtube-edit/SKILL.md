@@ -41,6 +41,9 @@ edit `edl_raw.json` yourself (times only from `transcript.json`):
   live demos untightened by giving them `"role": "broll"`.
 - **Caption fixes**: `"captions": {"enabled": false, "replacements": {"cloud": "Claude"}}`
   (long-form uploads the SRT instead of burning text in).
+- **Music and cutaways** (optional, `royalty-free-media` skill): a ducked music
+  bed, and `uv run llmve media suggest <ws>` for a few licensed B-roll/funny clips
+  where they help.
 - **Graphics** (optional, `motion-graphics` skill): `uv run llmve graphics chapters <ws>`
   for chapter title cards, a `lower-third` with the speaker's name in the first
   minute, `callout`s for key numbers.
@@ -65,8 +68,11 @@ Check `QC PASSED`, then fix every chapter warning (YouTube silently hides
 chapters that break its rules) and re-render.
 
 ## 6. Deliver
+Run `uv run llmve publish <ws>` (`youtube-publish` skill): it writes the titles,
+description, tags and three thumbnails next to the video. Then report:
 - MP4 path, raw -> final runtime, the 3-5 biggest editorial calls
 - `<out>.chapters.txt` contents, ready to paste into the description
 - `<out>.srt` (upload in YouTube Studio > Subtitles)
-- 3 title options (under 60 characters, payoff first) and 2-3 thumbnail moments
+- the recommended title, the description block and the three thumbnails from
+  `<out>.upload.md`, plus anything listed under "Check before uploading"
 Notes ("cut the part about X") -> edit `edl_raw.json`, re-run from cut-audit.

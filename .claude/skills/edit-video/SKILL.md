@@ -26,10 +26,12 @@ and whether a local B-roll library exists.
 | 2 | (plan) | `uv run llmve plan <ws> -p "<brief>" -t <platform> --target-duration 10m` | `edl_raw.json` exists |
 | 3 | `b-roll-select` | `uv run llmve broll match <ws> --library <dir>` | optional |
 | 3b | `motion-graphics` | `uv run llmve graphics add <ws> --at <clip> -t <template> ...` | optional |
+| 3c | `royalty-free-media` | `uv run llmve music add ...`, `uv run llmve media suggest <ws>` | optional |
 | 4 | `cut-audit` | `uv run llmve cut-audit <ws>` | must print `PASSED` |
 | 5 | `take-geometry` | `uv run llmve geometry <ws>` | every cut has a placement |
 | 6 | `review-gate` | `uv run llmve review <ws>` | **stop and show the sheet to the user** |
 | 7 | render | `uv run llmve render <ws> -o <out.mp4>` | `QC PASSED` |
+| 8 | `youtube-publish` | `uv run llmve publish <ws>` | `<out>.upload.md` + 3 thumbnails |
 
 `uv run llmve run <inputs> -p ... -t ... [--broll-library <dir>]` chains steps
 1-6 and stops at the review sheet (exit code 2). Prefer the step-by-step form

@@ -20,6 +20,8 @@ ViolationKind = Literal[
     "overlay_out_of_bounds",
     "graphic_out_of_bounds",
     "unknown_graphic",
+    "music_out_of_bounds",
+    "unknown_music",
 ]
 
 
