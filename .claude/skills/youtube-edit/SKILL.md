@@ -5,10 +5,21 @@ description: Edit one long raw recording (talking head, tutorial, podcast, scree
 
 # /youtube-edit
 
-Long-form specialisation of `edit-video`: same stages, same gates, same rules
-(never open media files, only the user approves the review). Read
-`.claude/skills/edit-video/SKILL.md` first; this skill adds the editorial
-judgement and the long-form options. See `reference.md` for the EDL fields.
+Long-form specialisation of `edit-video`. Default: one command, then refine.
+
+```bash
+uv run llmve auto <recording> -p "<brief: topic, audience, what to keep>" -t youtube \
+    --target-duration 15m --name "Your Name|What you do" -o <out.mp4>
+```
+It removes dead air and long pauses (tight pacing, punch-ins on 1080p+ footage),
+names chapters, adds a ducked licensed music bed and a few cutaways only where
+they help, auto-approves the review, renders with chapters embedded and writes
+`<out>.upload.md` with titles, description, tags and three thumbnails. Show the
+result as `edit-video` describes, then apply notes with `refine-edit` +
+`uv run llmve finish <ws>`.
+
+The sections below are the editorial judgement to apply when refining (or when
+the user wants to drive each stage by hand). See `reference.md` for EDL fields.
 
 ## 1. Intake
 Ask in one message only what you cannot infer: target length (default: what

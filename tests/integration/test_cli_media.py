@@ -53,3 +53,25 @@ def test_media_and_music_commands(tmp_path, monkeypatch):
     res = cli.invoke(app, ["media", "search", root, "city", "--kind", "video",
                            "-p", "pixabay", "-p", "pexels"])
     assert res.exit_code == 0 and "PIXABAY_API_KEY" in res.output and "PEXELS_API_KEY" in res.output
+
+
+def test_media_place_puts_one_cutaway_at_an_exact_moment(tmp_path):
+    from llm_video_editor.schemas import ClipsManifest
+    from llm_video_editor.stages.cut_audit import run_cut_audit
+
+    raw = tmp_path / "raw"
+    make_clip(raw / "talk.mp4", duration=6, size=(640, 360))
+    ws = Workspace.open(raw, home=tmp_path / "home")
+    info = watch(ws, transcriber=FakeTranscriber()).manifest.clips[0]
+    Workspace.write(ws.edl_raw, EDL(target_platform="youtube", width=640, height=360, clips=[
+        EDLClip(clip_id="c1", source_clip_id=info.clip_id, source_file=info.source_file,
+                start=0, end=4)]))
+    clip = make_clip(tmp_path / "dl" / "cat.mp4", duration=5, size=(640, 360), audio=None)
+    res = CliRunner().invoke(app, ["media", "place", str(ws.root), str(clip), "--at", "c1",
+                                   "--offset", "1", "--duration", "2"])
+    assert res.exit_code == 0, res.output
+    (ov,) = Workspace.read(ws.edl_raw, EDL).overlays
+    assert (ov.overlay_id, ov.anchor_clip_id, ov.offset, ov.duration) == ("p001", "c1", 1.0, 2.0)
+    assert Workspace.read(ws.clips_manifest, ClipsManifest).get(ov.source_clip_id).kind == "broll"
+    audited, rep = run_cut_audit(ws)
+    assert rep.passed and len(audited.overlays) == 1

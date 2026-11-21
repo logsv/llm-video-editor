@@ -3,8 +3,25 @@
 Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
 16:9, Reels/TikTok 9:16), through checkpointed stages.
 
+## Working with Claude (the primary way to use this repo)
+- Default flow: `uv run llmve auto <inputs> -p "<brief>" -t <platform> -o <out.mp4>` does
+  the whole edit in one command and auto-approves its review; then the user gives
+  notes and Claude applies them (`refine-edit` skill) and runs `uv run llmve finish <ws>`
+  (audit -> review -> render -> publish, no re-transcription or re-planning).
+- Skill routing: any edit request -> `edit-video`; one long recording for YouTube ->
+  `youtube-edit`; clips/Shorts -> `youtube-shorts`; reactions to a render -> `refine-edit`;
+  music/SFX/voice-over/B-roll/funny clips -> `royalty-free-media`; titles, thumbnails,
+  description -> `youtube-publish`; titles/lower thirds/cards -> `motion-graphics`.
+  Single-stage skills (`watch`, `cut-audit`, `take-geometry`, `review-gate`,
+  `b-roll-select`) are for debugging one stage.
+- After each run, show the user the review sheet and thumbnails (read the PNG/JPG),
+  the QC line and every warning, and offer concrete next improvements.
+- Local Python API / a future frontend: build on `stages.auto.auto_edit` and
+  `finish_edit` (same options as the CLI); keep them free of CLI concerns.
+
 ## Pipeline (each stage = one tested module + one CLI command)
-`watch` → `plan` → `b-roll-select` → `cut-audit` → `take-geometry` → `review-gate` → `render`
+`watch` → `plan` → `b-roll-select` → (graphics, media) → `cut-audit` → `take-geometry` →
+`review-gate` → `render` → `publish`; `auto` runs all of them, `finish` the part from cut-audit on.
 
 - Code: `llm_video_editor/stages/*.py`; ffmpeg wrappers in `llm_video_editor/ffmpeg/`;
   checkpoint schemas in `llm_video_editor/schemas/`; LLM providers in `llm_video_editor/llm/`.
@@ -35,7 +52,9 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
   descriptions). `llm.base.assert_text_only` enforces it; keep it that way.
 - The LLM never invents timestamps: it selects segment ids, resolved locally.
 - Run ffmpeg through `llm_video_editor.ffmpeg.runner` (argv lists, never `shell=True`).
-- Do not approve a review or pass `--skip-review` / `--approve` unless the user asked.
+- `llmve auto` / `llmve finish` approve the review automatically: the user chose this
+  workflow, and the sheet is still written for reference. In step-by-step mode, do not
+  approve a review or pass `--skip-review` / `--approve` unless the user asked.
 - Checkpoint schema changes: bump nothing silently; update the model, its tests
   and `llmve schema` output together.
 

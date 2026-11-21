@@ -5,8 +5,16 @@ description: Find the best 20-60 second moments in a long video and render each 
 
 # /youtube-shorts
 
-Same stages and gates as `edit-video` (read it first). One workspace holds one
-cut at a time, so shorts are made one after another.
+One short per command (one workspace holds one cut at a time):
+
+```bash
+uv run llmve auto <recording> -t shorts --target-duration 40s \
+    -p "<the moment: what it is about, hook first>" -o shorts/01-<name>.mp4
+```
+Vertical defaults: face-tracked 9:16 crop, burned-in word-highlight captions,
+tight pacing, upbeat ducked music, three vertical thumbnails. To pick moments
+first, read `transcript.md` as below and run one `auto` per moment with a brief
+naming its segments. Refine with `refine-edit` + `uv run llmve finish <ws>`.
 
 ## 1. Find the moments
 ```bash

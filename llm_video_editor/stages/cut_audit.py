@@ -27,7 +27,7 @@ from ..schemas import (
     Word,
 )
 from ..workspace import Workspace
-from .pacing import apply_pacing
+from .pacing import apply_pacing, speech_islands
 
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*$")
 
@@ -179,8 +179,19 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
 
     # -- duration budget ------------------------------------------------------------
     target = edl.target_duration
+    # judge the budget on the length the clips will have *after* jump-cut tightening,
+    # otherwise pauses that pacing is about to remove cost whole clips here
+    words_by_clip = {ct.clip_id: ct.words() for ct in transcript.clips}
+
+    def length(c: EDLClip) -> float:
+        if not edl.pacing.tighten or c.role != "a_roll":
+            return c.duration
+        spans = speech_islands(c.start, c.end, words_by_clip.get(c.source_clip_id, []),
+                               edl.pacing)
+        return sum(e - s for s, e in spans)
+
     if target:
-        total = sum(c.duration for c in kept)
+        total = sum(length(c) for c in kept)
         hi, lo = target * (1 + cfg.tolerance), target * (1 - cfg.tolerance)
         if total > hi:
             order = sorted(range(len(kept)), key=lambda i: (-kept[i].priority, -i))
@@ -189,7 +200,7 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
                 if total <= hi or len(kept) - len(dropped) <= 1:
                     break
                 dropped.add(i)
-                total -= kept[i].duration
+                total -= length(kept[i])
             for i in sorted(dropped):
                 rec.add("duration_budget", kept[i], "over the duration budget", fixed=True,
                         fix=f"dropped priority-{kept[i].priority} clip")

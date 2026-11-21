@@ -1,51 +1,61 @@
 ---
 name: edit-video
-description: Turn raw footage (a file, a folder of clips, or a glob) into a platform-ready cut from a natural-language brief, e.g. "10-minute YouTube edit from ./raw_clips" or "60s reel of the top 3 takeaways". Runs the checkpointed llmve pipeline stage by stage and owns the approval points. Use this as the entry point for any video-editing request in this repo.
+description: Turn raw footage (a file, a folder of clips, or a glob) into a finished, platform-ready video from a natural-language brief, e.g. "10-minute YouTube edit from ./raw_clips" or "60s reel of the top 3 takeaways". Runs the whole edit with one command (auto-approved), shows the result, then improves it from the user's notes. Use this as the entry point for any video-editing request in this repo.
 ---
 
-# Edit a video with the llmve pipeline
+# Edit a video
 
-Specialised entry points that follow this pipeline: `youtube-edit` for one
-long recording -> 16:9 YouTube video (cold open, jump-cut pacing, chapters,
-SRT) and `youtube-shorts` for clipping vertical Shorts out of a long video.
+One command does the whole edit; then you and the user improve it together.
+You never open video or audio files (`.claude/settings.json` blocks them): you
+work from JSON checkpoints and the PNG sheets and thumbnails the stages write.
 
-You orchestrate deterministic, tested stages. You never open video or audio
-files (`.claude/settings.json` blocks them); you work only from the JSON
-checkpoints and PNG contact sheets the stages write under
-`.llmve/<batch_hash>/`.
+## 1. Brief (ask only what you cannot infer, in one message)
+Platform (`youtube`, `shorts`, `reels`, `tiktok`, `twitter`, `linkedin`), target
+length, and the speaker's name/role if a lower third would help. Everything else
+has a sensible automatic default.
 
-## 0. Clarify the brief (only what you cannot infer)
-Ask only for what you can't infer, at most these three: the target platform
-(`youtube`, `reels`, `tiktok`, `twitter`, `linkedin`), the target duration,
-and whether a local B-roll library exists.
+## 2. One command
+```bash
+uv run llmve auto <inputs> -p "<brief>" -t <platform> --target-duration 10m -o <out.mp4>
+```
+It runs watch -> plan -> pacing, captions, chapters, ducked music, licensed
+cutaways, graphics -> cut-audit -> geometry -> review (auto-approved; the user
+chose this workflow) -> render -> publish, and prints one line per step
+(`done` / `skip` with the reason / `fail`). Useful options:
+`--name "Jane Doe|Founder"`, `--music-query "lofi chill"`, `--music off|<file>`,
+`--no-cutaways`, `--no-humor`, `--pacing natural`, `--captions burn`,
+`--broll-library <dir>`, `--draft` (fast preview), `--review` (stop at the
+sheet instead of approving). Long recordings: it chunks ASR automatically.
 
-## 1. Run the stages in order
-| Step | Skill | Command | Gate |
-|---|---|---|---|
-| 1 | `watch` | `uv run llmve watch <inputs>` | prints the workspace path; check `clips_manifest.json` |
-| 2 | (plan) | `uv run llmve plan <ws> -p "<brief>" -t <platform> --target-duration 10m` | `edl_raw.json` exists |
-| 3 | `b-roll-select` | `uv run llmve broll match <ws> --library <dir>` | optional |
-| 3b | `motion-graphics` | `uv run llmve graphics add <ws> --at <clip> -t <template> ...` | optional |
-| 3c | `royalty-free-media` | `uv run llmve music add ...`, `uv run llmve media suggest <ws>` | optional |
-| 4 | `cut-audit` | `uv run llmve cut-audit <ws>` | must print `PASSED` |
-| 5 | `take-geometry` | `uv run llmve geometry <ws>` | every cut has a placement |
-| 6 | `review-gate` | `uv run llmve review <ws>` | **stop and show the sheet to the user** |
-| 7 | render | `uv run llmve render <ws> -o <out.mp4>` | `QC PASSED` |
-| 8 | `youtube-publish` | `uv run llmve publish <ws>` | `<out>.upload.md` + 3 thumbnails |
+If a core step fails (watch, plan, cut-audit, render) read the message and
+`<ws>/auto_report.json`; fix the cause (brief, missing tool) and run again: it
+reuses finished work.
 
-`uv run llmve run <inputs> -p ... -t ... [--broll-library <dir>]` chains steps
-1-6 and stops at the review sheet (exit code 2). Prefer the step-by-step form
-when something needs fixing between stages.
+## 3. Show the result
+Tell the user, briefly: output path, length, QC line (LUFS, A/V offset), what each
+automatic choice did (from the step lines: chapters, music track and licence,
+cutaways placed, pauses removed) and every warning. Show
+`<ws>/review/sheet_000.png` and the three `<out>.thumbN.jpg` (read the images),
+then the recommended title from `<out>.upload.md`. Offer two or three concrete
+improvements you noticed (e.g. "the intro runs 25 s before the point").
 
-## 2. Rules
-- Never approve the review for the user unless they told you to. The full
-  render is the slow, expensive step; the review sheet is there so a person
-  catches problems before it runs.
-- If cut-audit fails, read `cut_audit.json`. Then either re-plan with a
-  sharper brief or edit `edl_raw.json` (segment times must come from
-  `transcript.json`), and run cut-audit again. Never hand-edit `edl_audited.json`.
-- The planner (`--provider claude-cli`, the default) only ever receives text:
-  clip ids, transcript segments and B-roll descriptions. Never put media file
-  paths in a prompt; the provider layer rejects them.
-- At the end, report the QC line (duration, A/V offset, LUFS) and any
-  `review.json` warnings to the user.
+## 4. Improve from notes (the loop)
+For each note, use the `refine-edit` skill: it maps notes to the exact change
+(edit `edl_raw.json`, `llmve music/graphics/media ...`), then
+```bash
+uv run llmve finish <ws>          # audit -> review (approved) -> render -> publish
+```
+No new transcription or planning, so each round is quick. Re-plan with
+`llmve auto ... -p "<sharper brief>"` only when the user wants a different
+story, not a tweak.
+
+## Rules
+- Times come from `transcript.json`/`transcript.md`, never invented. Never hand-edit
+  `edl_audited.json` (cut-audit writes it).
+- The planner only receives text (clip ids, transcript lines); never put media
+  paths in a prompt.
+- Licensed media only (see `royalty-free-media`); every third-party file needs a
+  credit before upload.
+- Step-by-step stages (`watch`, `plan`, `cut-audit`, `geometry`, `review`,
+  `render`, `publish`) are still there for debugging one stage; prefer `auto` and
+  `finish`.

@@ -12,27 +12,45 @@ description, tags and three thumbnails next to the video.
 
 ## Quick start
 
-**In Claude Code** (open this repo, then type a slash command):
+**In Claude Code** (the main way to use it): open this repo and ask.
 
 ```
 /edit-video 10 minute YouTube edit of ./raw_clips: the three key ideas
+```
+
+Claude runs the whole edit with one command, shows you the result (review sheet,
+thumbnails, title, what it decided), then you give notes in plain words:
+
+```
+the intro is too long, music is too loud, add my name "Jane Doe, Founder"
+```
+
+and it applies them (`/refine-edit`) and re-renders in one step. More entry points:
+
+```
 /youtube-edit edit ~/Videos/raw-tutorial.mp4 for YouTube, about 15 minutes
 /youtube-shorts make 3 shorts from ~/Videos/raw-tutorial.mp4
-/motion-graphics add a lower third with my name and a title card per chapter
 /royalty-free-media add a calm music bed and a funny clip where it fits
+/motion-graphics add a lower third with my name and a title card per chapter
 /youtube-publish write the title, description and thumbnails for final.mp4
 ```
 
-Claude runs the stages below, stops at the review sheet for your approval, and
-then renders. It never approves the review for you unless you tell it to.
-
-**From the terminal:**
+**From the terminal**, the same in one command:
 
 ```bash
-uv run llmve run ./raw_clips/ -p "10 minute YouTube edit: the three key ideas" -t youtube
-# ... look at the review sheet it prints, then:
-uv run llmve review approve .llmve/<batch_hash>
-uv run llmve render .llmve/<batch_hash> -o final.mp4
+uv run llmve auto ./raw_clips/ -p "10 minute YouTube edit: the three key ideas" -t youtube -o final.mp4
+# -> final.mp4, final.srt, final.chapters.txt, final.upload.md, final.thumb1-3.jpg
+```
+
+`auto` runs every stage, picks pacing, captions, chapters, a ducked licensed music
+bed, a few cutaways where they help and graphics, approves its own review sheet
+(kept for reference; `--review` stops there instead), renders and writes the
+upload file. Each step prints `done`, `skip` (with the reason) or `fail`;
+optional steps never stop the edit. After editing `edl_raw.json` or running
+`llmve music/graphics/media ...`, re-render with:
+
+```bash
+uv run llmve finish .llmve/<batch_hash>     # audit -> review -> render -> publish
 ```
 
 ## Install
@@ -78,6 +96,7 @@ under `.llmve/<batch_hash>/`. The batch hash comes from the sorted
 | cut-audit | `llmve media search <ws> "<query>"` | search licensed music/SFX/video -> `media/search.json` | `--kind music\|sfx\|video`, `--provider`, `--limit`, `--length` |
 | `llmve media get <ws> <result_id>` | download a result, record its credit | `--library <dir>` (video) |
 | `llmve media add <ws> <file>` | register a file you have rights to (e.g. YouTube Audio Library) | `--title`, `--license`, `--provider`, `--creator`, `--attribution` |
+| `llmve media place <ws> <clip> --at <clip_id>` | put one cutaway clip at an exact moment | `--offset`, `--duration`, `--src-start`, `--pip` |
 | `llmve media credits <ws>` | list registered media and credit lines | |
 | `llmve media suggest <ws>` | suggest a few cutaway moments (may be none) | `--no-humor`, `--every`, `--brief`, `--provider` |
 | `llmve media fetch <ws>` | download a licensed clip per slot, add overlays | `--library`, `--provider` |
@@ -91,9 +110,10 @@ under `.llmve/<batch_hash>/`. The batch hash comes from the sorted
 `llmve transcript <ws>` writes a compact `transcript.md` (segment ids, times,
 `(retake?)` markers, long pauses) for reading or planning by hand.
 
-`llmve run` chains watch → plan → b-roll → cut-audit → geometry → review and
-stops at the review sheet unless you pass `--approve`. It does not add
-graphics; use the step-by-step commands for that. `llmve schema <name>` prints
+`llmve auto` chains every stage below (plus music, cutaways, graphics and publish)
+and approves automatically; `llmve finish` re-runs the part from cut-audit on.
+`llmve run` is the older chain that stops at the review sheet unless you pass
+`--approve`. `llmve schema <name>` prints
 the JSON Schema of any checkpoint.
 
 ### Multi-clip shoots (e.g. 30 minutes of clips into a 10-minute edit)
@@ -306,6 +326,8 @@ Every command has `--help`.
 
 | Command | What it does | Useful options |
 |---|---|---|
+| `llmve auto <inputs...> -p "<brief>"` | the whole edit in one command, auto-approved, plus upload file | `-t`, `--target-duration`, `-o`, `--name "Name\|Role"`, `--music auto\|off\|<file>`, `--music-query`, `--no-cutaways`, `--no-humor`, `--no-graphics`, `--pacing`, `--captions`, `--broll-library`, `--review`, `--draft` |
+| `llmve finish <ws>` | after a change: cut-audit -> geometry -> review (approved) -> render -> publish | `-o`, `--review`, `--no-publish`, `--draft` |
 | `llmve watch <inputs...>` | transcribe, score scenes, classify A-roll/B-roll, overview sheets | `--asr-model` (default `distil-large-v3`, English), `--language`, `--chunk-asr-over <min>`, `--asr-workers`, `--home` |
 | `llmve watch-window <ws> <clip_id> <start> <end>` | dense contact sheets for one window | `--fps` (default 2) |
 | `llmve transcript <ws>` | write `transcript.md` with ids, times, pauses, `(retake?)` | `--clip <clip_id>` |
@@ -334,7 +356,8 @@ which tested `llmve` command to run and how to read its checkpoint.
 
 | Slash command | Use it for |
 |---|---|
-| `/edit-video` | any edit from a brief (entry point; runs the whole pipeline) |
+| `/edit-video` | any edit from a brief (entry point: one command, then notes) |
+| `/refine-edit` | apply your notes to the last render ("shorter", "music too loud", "add my name") |
 | `/youtube-edit` | one long recording -> 16:9 YouTube video with cold open, pacing, chapters and SRT |
 | `/youtube-shorts` | the best 20-60 s moments of a long video -> vertical clips |
 | `/motion-graphics` | lower thirds, chapter cards, callouts, custom HyperFrames compositions |
@@ -342,7 +365,9 @@ which tested `llmve` command to run and how to read its checkpoint.
 | `/youtube-publish` | SEO title, description, tags, location details and three thumbnails |
 | `/watch`, `/cut-audit`, `/take-geometry`, `/b-roll-select`, `/review-gate` | one stage on its own |
 
-Claude never approves the review sheet for you unless you tell it to.
+`llmve auto`/`finish` approve their own review sheet (you chose this workflow;
+the sheet is kept for reference). In step-by-step mode Claude never approves a
+review unless you tell it to.
 `.claude/settings.json` denies reads of raw video/audio, so agents work only
 from JSON checkpoints and contact sheets.
 

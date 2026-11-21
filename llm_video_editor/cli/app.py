@@ -475,6 +475,40 @@ def media_fetch_cmd(
     console.print(f"Next: `llmve cut-audit {workspace}`")
 
 
+@media_app.command("place")
+def media_place_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory"),
+    file: Path = typer.Argument(..., exists=True, help="Video clip (downloaded or your own)"),
+    at: str = typer.Option(..., "--at", help="Clip id in edl_raw.json the cutaway sits on"),
+    offset: float = typer.Option(0.0, help="Seconds after the clip starts"),
+    duration: float = typer.Option(3.0, help="Seconds on screen"),
+    src_start: float = typer.Option(0.0, help="Start this far into the cutaway clip"),
+    pip: bool = typer.Option(False, help="Picture-in-picture instead of full frame"),
+) -> None:
+    """Put one cutaway clip at an exact moment (adds an overlay to edl_raw.json)."""
+    from ..schemas import EDL, ClipsManifest, Overlay
+    from ..stages.cutaways import _register
+
+    ws = Workspace.load(workspace)
+    edl = Workspace.read(ws.edl_raw, EDL)
+    if at not in {c.clip_id for c in edl.clips}:
+        raise typer.BadParameter(f"no clip {at!r} in edl_raw.json")
+    manifest = Workspace.read(ws.clips_manifest, ClipsManifest)
+    info = _register(manifest, file.resolve(), file.stem)
+    used = {o.overlay_id for o in edl.overlays}
+    n = 1
+    while f"p{n:03d}" in used:
+        n += 1
+    ov = Overlay(overlay_id=f"p{n:03d}", source_clip_id=info.clip_id,
+                 source_file=info.source_file, src_start=src_start, anchor_clip_id=at,
+                 offset=offset, duration=min(duration, info.duration - src_start),
+                 zone="pip" if pip else "full")
+    Workspace.write(ws.clips_manifest, manifest)
+    Workspace.write(ws.edl_raw, edl.model_copy(update={"overlays": [*edl.overlays, ov]}))
+    console.print(f"{ov.overlay_id}: {file.name} on {at} +{offset:g}s for {ov.duration:g}s. "
+                  f"Next: `llmve finish {workspace}`")
+
+
 music_app = typer.Typer(help="Background music, sound effects and voice-over.",
                         no_args_is_help=True)
 app.add_typer(music_app, name="music")
@@ -641,6 +675,112 @@ def _print_qc(qc) -> None:
                       f"{Path(qc.output).with_suffix('.chapters.txt')})")
     if qc.captions_srt:
         console.print(f"  captions: {qc.captions_srt}")
+
+
+@app.command("auto")
+def auto_cmd(
+    inputs: list[str] = typer.Argument(..., help="Video file(s), folder(s) or glob(s)"),
+    prompt: str = typer.Option(..., "--prompt", "-p", help="What the edit should be"),
+    target: str = typer.Option("youtube", "--target", "-t", help=TARGETS),
+    target_duration: str | None = typer.Option(None, help="e.g. 10m, 45s (default: preset)"),
+    out: Path | None = typer.Option(None, "--out", "-o", help="Output .mp4 (default: ./<input>-<target>.mp4)"),
+    pacing: str = typer.Option("auto", help="auto | tight | natural | off"),
+    captions: str = typer.Option("auto", help="auto (burn for vertical, .srt for YouTube) | burn | srt"),
+    chapters: bool = typer.Option(True, help="Name YouTube chapters automatically"),
+    music: str = typer.Option("auto", help="auto (licensed search) | off | path/to/track.mp3"),
+    music_query: str | None = typer.Option(None, help='Mood for the music search, e.g. "lofi chill"'),
+    cutaways: bool = typer.Option(True, help="Add a few licensed B-roll/funny clips where they help"),
+    humor: bool = typer.Option(True, help="Allow funny cutaways"),
+    graphics: bool = typer.Option(True, help="Chapter cards / lower third (needs Node 22+)"),
+    name: str | None = typer.Option(None, help='Lower third, e.g. "Jane Doe|Founder"'),
+    broll_library: Path | None = typer.Option(None, help="Your own B-roll folder to use first"),
+    review: bool = typer.Option(False, "--review", help="Stop at the review sheet instead of auto-approving"),
+    publish: bool = typer.Option(True, help="Write <out>.upload.md and three thumbnails"),
+    geocode: bool = typer.Option(False, help="Place name from GPS (sends coordinates to OpenStreetMap)"),
+    use_location: bool = typer.Option(False, help="Let the upload copy mention the place"),
+    draft: bool = typer.Option(False, help="Fast low-quality encode"),
+    encoder: str = ENCODER,
+    detector: str = typer.Option("auto", help="auto | mediapipe | yolo | none"),
+    asr_model: str = typer.Option("distil-large-v3", help="faster-whisper model"),
+    language: str | None = typer.Option(None, help="Force ASR language (e.g. hi)"),
+    chunk_asr_over: float = typer.Option(10.0, help="Chunked ASR above this many minutes (0 = off)"),
+    provider: str = PROVIDER,
+    model: str | None = typer.Option(None),
+    home: Path | None = HOME,
+) -> None:
+    """The whole edit in one command: decides, auto-approves, renders and writes the upload file."""
+    from ..stages.auto import AutoOptions, StepFailed, auto_edit
+    from ..stages.durations import parse_duration
+
+    if pacing not in ("auto", "tight", "natural", "off"):
+        raise typer.BadParameter("--pacing is auto, tight, natural or off")
+    if captions not in ("auto", "burn", "srt"):
+        raise typer.BadParameter("--captions is auto, burn or srt")
+    opts = AutoOptions(
+        target=target, target_duration=parse_duration(target_duration) if target_duration else None,
+        out=out, pacing=pacing, captions=captions, chapters=chapters, music=music,
+        music_query=music_query, cutaways=cutaways, humor=humor, graphics=graphics, name=name,
+        broll_library=broll_library, approve=not review, publish=publish, geocode=geocode,
+        use_location=use_location, draft=draft, encoder=encoder, detector=detector,
+        asr_model=asr_model, language=language, chunk_asr_over=chunk_asr_over or None)
+    icons = {"done": "[green]done[/green]", "skipped": "[yellow]skip[/yellow]",
+             "failed": "[red]fail[/red]"}
+
+    def show(rep):
+        console.print(f"{icons[rep.status]} {rep.step:<14} {rep.detail} ({rep.seconds:g}s)")
+
+    try:
+        rep = auto_edit(inputs, prompt, _provider(provider, model), opts, home=home, on_step=show)
+    except StepFailed as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+    for w in rep.warnings:
+        console.print(f"[yellow]warning:[/yellow] {w}")
+    if not rep.approved:
+        console.print(f"Review the sheet, then `llmve review approve {rep.workspace}` and "
+                      f"`llmve render {rep.workspace}`.")
+        raise typer.Exit(2)
+    console.print(f"[bold]{rep.output}[/bold]" + (f"\nupload file: {rep.upload}" if rep.upload else ""))
+
+
+@app.command("finish")
+def finish_cmd(
+    workspace: Path = typer.Argument(..., help="Workspace directory (from `llmve auto`)"),
+    out: Path | None = typer.Option(None, "--out", "-o", help="Output .mp4 (default: the last one)"),
+    target: str | None = typer.Option(None, "--target", "-t", help="Default: the EDL's platform"),
+    review: bool = typer.Option(False, "--review", help="Stop at the review sheet"),
+    publish: bool = typer.Option(True, help="Rewrite <out>.upload.md and thumbnails"),
+    draft: bool = typer.Option(False, help="Fast low-quality encode"),
+    encoder: str = ENCODER,
+    detector: str = typer.Option("auto", help="auto | mediapipe | yolo | none"),
+    provider: str = PROVIDER,
+    model: str | None = typer.Option(None),
+) -> None:
+    """After editing edl_raw.json (or `llmve music/graphics/media` changes): audit, review,
+    render and publish again, auto-approved. No new transcription or planning."""
+    from ..schemas import EDL
+    from ..stages.auto import AutoOptions, StepFailed, finish_edit
+
+    ws = Workspace.load(workspace)
+    platform = target or Workspace.read(ws.edl_raw, EDL).target_platform
+    opts = AutoOptions(target=platform, out=out, approve=not review, publish=publish,
+                       draft=draft, encoder=encoder, detector=detector)
+
+    def show(rep):
+        icon = {"done": "[green]done[/green]", "skipped": "[yellow]skip[/yellow]",
+                "failed": "[red]fail[/red]"}[rep.status]
+        console.print(f"{icon} {rep.step:<14} {rep.detail} ({rep.seconds:g}s)")
+
+    try:
+        rep = finish_edit(ws, _provider(provider, model), opts, on_step=show)
+    except StepFailed as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+    for w in rep.warnings:
+        console.print(f"[yellow]warning:[/yellow] {w}")
+    if not rep.approved:
+        raise typer.Exit(2)
+    console.print(f"[bold]{rep.output}[/bold]" + (f"\nupload file: {rep.upload}" if rep.upload else ""))
 
 
 @app.command("run")
