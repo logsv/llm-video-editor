@@ -1,10 +1,11 @@
 # LLM Video Editor
 
-Prompt-driven video editing for YouTube (16:9) and Reels/TikTok (9:16). You
-point it at a clip or a folder of raw footage and describe the cut you want.
-It transcribes, plans and audits the cut, keeps captions and overlays off the
-speaker's face, shows you a preview sheet to approve, and then renders once,
-normalised to -14 LUFS.
+Prompt-driven video editing for YouTube (16:9) and Shorts/Reels/TikTok (9:16).
+Point it at a clip or a folder of raw footage and describe the cut you want. It
+transcribes, plans and audits the cut, keeps captions and overlays off the
+speaker's face, adds chapters, jump-cut pacing and motion graphics when you ask,
+shows you a preview sheet to approve, and then renders once, normalised to
+-14 LUFS.
 
 ![LLM Video Editor Workflow](assets/video_editor_workflow.gif)
 
@@ -16,10 +17,11 @@ normalised to -14 LUFS.
 /edit-video 10 minute YouTube edit of ./raw_clips: the three key ideas
 /youtube-edit edit ~/Videos/raw-tutorial.mp4 for YouTube, about 15 minutes
 /youtube-shorts make 3 shorts from ~/Videos/raw-tutorial.mp4
+/motion-graphics add a lower third with my name and a title card per chapter
 ```
 
 Claude runs the stages below, stops at the review sheet for your approval, and
-then renders.
+then renders. It never approves the review for you unless you tell it to.
 
 **From the terminal:**
 
@@ -30,7 +32,34 @@ uv run llmve review approve .llmve/<batch_hash>
 uv run llmve render .llmve/<batch_hash> -o final.mp4
 ```
 
+## Install
+
+Needs Python 3.11+, [uv](https://docs.astral.sh/uv/) and FFmpeg with libass,
+libfreetype and libvpx (`apt install ffmpeg` or `brew install ffmpeg`; standard
+builds have all three).
+
+```bash
+uv sync --extra dev                       # core pipeline + tests
+uv sync --extra dev --extra vision        # + MediaPipe face detection (Linux: apt install libegl1)
+uv run llmve graphics doctor --install    # optional: motion graphics (needs Node.js 22+)
+```
+
+| Extra | Adds |
+|---|---|
+| `vision` | MediaPipe face detector for take-geometry |
+| `pro` | YOLO person fallback, music ducking (Demucs) |
+| `gen` | generative B-roll fallback (Open-Sora / Stable Video Diffusion) |
+| `graph` | LangGraph orchestration (`llm_video_editor.graph`) with a review interrupt |
+| `anthropic`, `openai` | API planner providers |
+
+Motion graphics are not a Python extra: `llmve graphics doctor --install`
+installs a pinned HyperFrames + GSAP with npm into `~/.cache/llmve` (see
+[Motion graphics](#motion-graphics-hyperframes)).
+
 ## How it works
+
+`watch` → `plan` → `b-roll-select` → `motion-graphics` → `cut-audit` →
+`take-geometry` → `review-gate` → `render`
 
 Each stage reads the previous stage's JSON checkpoint and writes its own
 under `.llmve/<batch_hash>/`. The batch hash comes from the sorted
@@ -38,19 +67,22 @@ under `.llmve/<batch_hash>/`. The batch hash comes from the sorted
 
 | Stage | Command | Writes | Notes |
 |---|---|---|---|
-| watch | `llmve watch <inputs>` | `transcript.json`, `clips_manifest.json`, `sheets/` | word-level faster-whisper (optionally chunked and parallel for long clips, see below); scene/motion scores; clips with no speech tagged as B-roll; 4x4 contact sheets (0.5 FPS overview, 2 FPS on request via `watch-window`) |
-| plan | `llmve plan <ws> -p ...` | `asset_plan.json`, `edl_raw.json` | map/reduce over the whole transcript; the LLM picks **segment ids**, never timestamps; only text leaves the machine |
-| b-roll-select | `llmve broll index/describe/match` | `broll_select.json` | persistent `broll_index.md` in your B-roll folder, incremental rescans, BM25 + optional LLM re-rank |
-| cut-audit | `llmve cut-audit <ws>` | `cut_audit.json`, `edl_audited.json` | deterministic: word-edge snapping, sentence completion, per-clip clamping, overlaps, duration budget |
-| take-geometry | `llmve geometry <ws>` | `geometry_map.json` | MediaPipe face boxes per used scene; crop centre, caption band and PiP corner that avoid the face |
-| review-gate | `llmve review <ws>` / `review approve` | `review/sheet_*.png`, `review/review.json` | one composited frame per cut/overlay in seconds; render refuses until the current cut is approved |
-| render | `llmve render <ws>` | `render/<platform>.mp4` (+ `.srt`, `.chapters.txt`), `render/qc_report.json` | one encode; every segment normalised to 30 fps, square pixels, cover-crop/letterbox (never stretched), 48 kHz stereo; frame-exact concat; two-pass `loudnorm=I=-14:TP=-1.5:LRA=11`; NVENC/VideoToolbox when they actually work |
+| watch | `llmve watch <inputs>` | `transcript.json`, `clips_manifest.json`, `sheets/` | word-level faster-whisper (optionally chunked and parallel for long clips); scene/motion scores; clips with no speech tagged as B-roll; 4x4 contact sheets (0.5 FPS overview, 2 FPS on request via `watch-window`) |
+| plan | `llmve plan <ws> -p ...` | `asset_plan.json`, `edl_raw.json` | map/reduce over the whole transcript; the LLM picks **segment ids**, never timestamps; `(retake?)` hints; only text leaves the machine |
+| b-roll-select | `llmve broll index/describe/match` | `broll_select.json` | persistent `broll_index.md` in your B-roll folder, incremental rescans, BM25 + optional LLM re-rank (optional) |
+| motion-graphics | `llmve graphics add/chapters` | `graphics` in `edl_raw.json` | lower thirds, chapter cards, callouts, custom HyperFrames compositions (optional) |
+| cut-audit | `llmve cut-audit <ws>` | `cut_audit.json`, `edl_audited.json` | deterministic: word-edge snapping, sentence completion, per-clip clamping, overlaps (cold opens kept), duration budget, then jump-cut pacing; overlays and graphics re-anchored and kept inside the cut |
+| take-geometry | `llmve geometry <ws>` | `geometry_map.json` | MediaPipe face boxes per used scene; crop centre (zoom-aware), caption band and PiP corner that avoid the face |
+| review-gate | `llmve review <ws>` / `review approve` | `review/sheet_*.png`, `review/review.json` | one composited frame per cut, B-roll overlay and graphic; render refuses until the current cut is approved |
+| render | `llmve render <ws>` | `<out>.mp4`, `<out>.srt`, `<out>.chapters.txt`, `render/qc_report.json` | one encode; every segment normalised to 30 fps, square pixels, cover-crop/letterbox (never stretched), 48 kHz stereo; frame-exact concat; B-roll, then graphics, then captions; two-pass `loudnorm=I=-14:TP=-1.5:LRA=11`; chapters embedded; NVENC/VideoToolbox when they actually work |
 
 `llmve transcript <ws>` writes a compact `transcript.md` (segment ids, times,
 `(retake?)` markers, long pauses) for reading or planning by hand.
 
-`llmve run` chains every stage and stops at the review sheet unless you pass
-`--approve`. `llmve schema <name>` prints the JSON Schema of any checkpoint.
+`llmve run` chains watch → plan → b-roll → cut-audit → geometry → review and
+stops at the review sheet unless you pass `--approve`. It does not add
+graphics; use the step-by-step commands for that. `llmve schema <name>` prints
+the JSON Schema of any checkpoint.
 
 ### Multi-clip shoots (e.g. 30 minutes of clips into a 10-minute edit)
 Pass a folder or glob. Mixed cameras (30/60 fps, different resolutions and
@@ -97,6 +129,7 @@ uv run llmve transcript .llmve/<batch_hash>        # read transcript.md: retakes
 uv run llmve plan .llmve/<batch_hash> -t youtube --target-duration 15m \
     -p "keep the last clean take of every line, cut setup chatter, open on the result"
 # optional: edit edl_raw.json (cold open, chapters, pacing, caption fixes; see below)
+uv run llmve graphics chapters .llmve/<batch_hash> # optional: a title card per chapter
 uv run llmve cut-audit .llmve/<batch_hash>         # also applies pacing.tighten
 uv run llmve geometry .llmve/<batch_hash>
 uv run llmve review .llmve/<batch_hash>            # look at review/sheet_*.png
@@ -116,8 +149,8 @@ Optional EDL fields in `edl_raw.json`:
 - **Jump-cut tightening** runs as the last step of cut-audit: A-roll clips are
   split into speech islands at pauses longer than `max_gap` (standalone um/uh
   count as pauses with `drop_fillers`). Splits sit on word edges inside clips
-  that already passed the sentence checks; overlays follow the piece that plays
-  their moment.
+  that already passed the sentence checks; overlays and graphics follow the
+  piece that plays their moment.
 - **Punch-ins**: `zoom` per clip, or `punch_in: alternate` to zoom every second
   island so jump cuts read as camera changes. Geometry and review use the same
   zoomed crop.
@@ -138,6 +171,8 @@ is what `/youtube-shorts` runs):
 uv run llmve transcript .llmve/<batch_hash>        # pick the moments (segment ids)
 uv run llmve plan .llmve/<batch_hash> -t shorts --target-duration 40s \
     -p "segments 41-47 only, hook first"
+uv run llmve graphics add .llmve/<batch_hash> --at c001 -t callout --duration 2 \
+    --var text="The one setting that matters"   # optional
 uv run llmve cut-audit .llmve/<batch_hash>
 uv run llmve geometry .llmve/<batch_hash>          # face-tracked 9:16 crop
 uv run llmve review .llmve/<batch_hash>
@@ -148,11 +183,12 @@ uv run llmve render .llmve/<batch_hash> -o shorts/01-hook.mp4
 ### Motion graphics (HyperFrames)
 Lower thirds, chapter title cards, keyword callouts or any custom animated
 HTML/GSAP composition, rendered by [HyperFrames](https://github.com/heygen-com/hyperframes)
-(Apache-2.0) to transparent VP9 WebM and composited in the render pass:
+(Apache-2.0) to transparent VP9 WebM and composited in the render pass. Add
+them after `plan` and before `cut-audit`:
 
 ```bash
 uv run llmve graphics doctor --install           # once: Node 22+, pinned HyperFrames + GSAP
-uv run llmve graphics templates                  # lower-third, title-card, callout
+uv run llmve graphics templates                  # lower-third, title-card, callout + variables
 uv run llmve graphics add .llmve/<batch_hash> --at c003 -t lower-third --offset 0.5 \
     --duration 4 --var title="Jane Doe" --var subtitle="Founder"
 uv run llmve graphics chapters .llmve/<batch_hash>    # a title card per chapter
@@ -160,48 +196,30 @@ uv run llmve graphics add .llmve/<batch_hash> --at c004 -c ./my-composition --bo
 uv run llmve cut-audit .llmve/<batch_hash>       # then geometry, review, render as usual
 ```
 
+| Template | Variables | Notes |
+|---|---|---|
+| `lower-third` | `title`, `subtitle`, `accent`, `position` (bottom-left, top-left, bottom-center) | in 9:16 it moves above the caption band |
+| `title-card` | `title`, `kicker`, `accent`, `dim` (0-1) | full-frame card over a dimmed shot; `graphics chapters` fills `title` and "Chapter N" |
+| `callout` | `text`, `accent`, `position` (top, center) | one short phrase that pops in |
+
 - Graphics are `EDL.graphics` entries anchored to a clip (like B-roll overlays):
-  cut-audit drops ones with a missing anchor or template, keeps them inside the
-  cut and moves them with jump-cut tightening.
-- Templates size themselves to the output frame (16:9 or 9:16); a custom
-  composition is any HyperFrames project folder with an `index.html`.
+  `--at` is a clip id from `edl_raw.json`, `--offset` is seconds into that clip,
+  and a graphic may run past its clip. cut-audit drops graphics with a missing
+  anchor or template, keeps them inside the cut and moves them with jump-cut
+  tightening.
+- Templates size themselves to the output frame (16:9 or 9:16). A custom
+  composition is any HyperFrames project folder with an `index.html` (root
+  `data-composition-id`, a paused GSAP timeline registered on
+  `window.__timelines["main"]`, transparent background); it is copied, never
+  modified. `--box x,y,w,h` (0-1) places it; the default is full frame.
 - The review sheet gets a `gNNN over cNNN` tile per graphic; render draws them
-  above B-roll and below burned-in captions. Renders are cached by content hash.
+  above B-roll and below burned-in captions. Renders are cached in
+  `.llmve/<batch_hash>/graphics/` by content hash, so review and render reuse them.
 - The toolchain is pinned (`hyperframes@0.8.34`, `gsap@3.13.0`) and installed into
   `$LLMVE_TOOLS` (default `~/.cache/llmve`); telemetry and update checks are off.
-  `HYPERFRAMES_BROWSER_PATH` points it at an existing Chrome/Chromium. GSAP is
-  copied in at render time and never committed (it is not open source).
+  GSAP is copied in at render time and never committed (it is not open source).
 - Graphics are decoded with `libvpx-vp9`, because ffmpeg's built-in VP9 decoder
   drops the alpha channel and turns the transparent area black.
-
-## Install
-
-Needs Python 3.11+, [uv](https://docs.astral.sh/uv/) and FFmpeg with libass
-and libfreetype (`apt install ffmpeg` or `brew install ffmpeg`). Motion graphics
-also need Node.js 22+ and an FFmpeg built with libvpx (standard builds are).
-
-```bash
-uv sync --extra dev                       # core pipeline + tests
-uv sync --extra dev --extra vision        # + MediaPipe face detection (Linux: apt install libegl1)
-```
-
-| Extra | Adds |
-|---|---|
-| `vision` | MediaPipe face detector for take-geometry |
-| `pro` | YOLO person fallback, music ducking (Demucs) |
-| `gen` | generative B-roll fallback (Open-Sora / Stable Video Diffusion) |
-| `graph` | LangGraph orchestration (`llm_video_editor.graph`) with a review interrupt |
-| `anthropic`, `openai` | API planner providers |
-
-## Planner providers
-
-`--provider claude-cli` (the default) runs
-`claude -p --output-format json --json-schema <schema> --tools "" --no-session-persistence`
-in a clean temporary directory, with the prompt on stdin. It needs Claude Code
-installed but no API key. The alternatives are `ollama` (local; `/api/chat`
-with a JSON-schema `format`), `anthropic` and `openai`. Every provider returns
-a validated Pydantic model. Prompts that mention a media file path are
-rejected before they're sent.
 
 ## Command reference
 
@@ -217,38 +235,82 @@ Every command has `--help`.
 | `llmve broll index <library>` | index a B-roll folder (incremental) | `--rescan`, `--no-sheets` |
 | `llmve broll describe <library> <item_id> "<text>"` | set a manual description | `--tags a,b,c` |
 | `llmve broll match <ws>` | fill B-roll slots, rebuild `edl_raw.json` | `-l <library>`, `--provider`, `--model`, `--generate-missing` |
-| `llmve cut-audit <ws>` | snap, fix, budget, apply pacing -> `edl_audited.json` | exits 1 if it fails |
-| `llmve geometry <ws>` | face boxes, crop centres, caption/PiP zones | `--detector auto\|mediapipe\|yolo\|none`, `--samples` |
 | `llmve graphics templates` | list built-in HyperFrames templates and their variables | |
 | `llmve graphics add <ws> --at <clip_id>` | add a motion graphic to `edl_raw.json` | `-t <template>` or `-c <folder>`, `--var k=v`, `--offset`, `--duration`, `--box x,y,w,h` |
-| `llmve graphics chapters <ws>` | a title card per chapter marker | `-t`, `--duration`, `--var`, `--no-numbered` |
-| `llmve graphics render <ws>` | pre-render every graphic (cached) | `--no-draft` |
+| `llmve graphics chapters <ws>` | a title card per chapter marker (replaces earlier cards) | `-t`, `--duration`, `--var`, `--no-numbered` |
+| `llmve graphics render <ws>` | pre-render every graphic in `edl_audited.json` (cached) | `--no-draft` |
 | `llmve graphics doctor` | check Node, npm, HyperFrames, libvpx | `--install` |
+| `llmve cut-audit <ws>` | snap, fix, budget, apply pacing, check graphics -> `edl_audited.json` | exits 1 if it fails |
+| `llmve geometry <ws>` | face boxes, crop centres, caption/PiP zones | `--detector auto\|mediapipe\|yolo\|none`, `--samples` |
 | `llmve review <ws>` | build the review sheet (status: pending) | |
 | `llmve review approve <ws>` / `reject <ws>` | record the decision | `--notes "..."` |
-| `llmve render <ws>` | one encode, -14 LUFS, QC, SRT, chapters | `-o out.mp4`, `--encoder auto\|h264_nvenc\|h264_videotoolbox\|libx264`, `--draft`, `--no-captions`, `--skip-review` |
+| `llmve render <ws>` | one encode, -14 LUFS, QC, SRT, chapters, graphics | `-o out.mp4`, `--encoder auto\|h264_nvenc\|h264_videotoolbox\|libx264`, `--draft`, `--no-captions`, `--skip-review` |
 | `llmve run <inputs...> -p "<brief>"` | watch -> plan -> b-roll -> cut-audit -> geometry -> review | all of the above plus `--broll-library`, `--approve` (approve and render) |
 | `llmve schema <name>` | JSON Schema of a checkpoint (`edl`, `transcript`, `qc_report`, ...) | |
 
 ## Claude Code skills
 
-`.claude/skills/` exposes the pipeline to Claude Code: `edit-video` (entry
-point), `watch`, `cut-audit`, `take-geometry`, `b-roll-select`,
-`review-gate`, `motion-graphics`, and two specialised entry points: `youtube-edit` (one long
-recording into a 16:9 YouTube video with cold open, pacing, chapters and SRT)
-and `youtube-shorts` (vertical clips from a long video). Each skill tells
-Claude which tested `llmve` command to run and how to read its checkpoint.
+`.claude/skills/` exposes the pipeline to Claude Code. Each skill tells Claude
+which tested `llmve` command to run and how to read its checkpoint.
 
 | Slash command | Use it for |
 |---|---|
 | `/edit-video` | any edit from a brief (entry point; runs the whole pipeline) |
-| `/youtube-edit` | one long recording -> 16:9 YouTube video with chapters and SRT |
+| `/youtube-edit` | one long recording -> 16:9 YouTube video with cold open, pacing, chapters and SRT |
 | `/youtube-shorts` | the best 20-60 s moments of a long video -> vertical clips |
 | `/motion-graphics` | lower thirds, chapter cards, callouts, custom HyperFrames compositions |
 | `/watch`, `/cut-audit`, `/take-geometry`, `/b-roll-select`, `/review-gate` | one stage on its own |
 
-Claude never approves the review sheet for you unless you tell it to. `.claude/settings.json` denies reads of raw
-video/audio, so agents work only from JSON checkpoints and contact sheets.
+Claude never approves the review sheet for you unless you tell it to.
+`.claude/settings.json` denies reads of raw video/audio, so agents work only
+from JSON checkpoints and contact sheets.
+
+## Planner providers
+
+`--provider claude-cli` (the default) runs
+`claude -p --output-format json --json-schema <schema> --tools "" --no-session-persistence`
+in a clean temporary directory, with the prompt on stdin. It needs Claude Code
+installed but no API key. The alternatives are `ollama` (local; `/api/chat`
+with a JSON-schema `format`), `anthropic` and `openai`. Every provider returns
+a validated Pydantic model. Prompts that mention a media file path are
+rejected before they're sent.
+
+## Workspace layout
+
+Everything for one batch of inputs lives in `.llmve/<batch_hash>/` (set
+`--home` or `$LLMVE_HOME` to move it). Your source files are only read.
+
+| Path | Written by | Contents |
+|---|---|---|
+| `transcript.json`, `clips_manifest.json` | watch | word-level transcript; per-clip size, fps, kind, scenes |
+| `sheets/*.png`, `sheets/index.json` | watch | overview contact sheets and the tile -> timestamp map |
+| `clips/<clip_id>/` | watch | per-clip ASR cache |
+| `transcript.md` | transcript | compact, readable transcript |
+| `asset_plan.json`, `edl_raw.json` | plan (+ broll match, graphics add/chapters) | the rough cut; the file you edit by hand |
+| `broll_select.json` | broll match | chosen B-roll per slot |
+| `cut_audit.json`, `edl_audited.json` | cut-audit | what was fixed, and the cut that renders |
+| `geometry_map.json` | geometry | face boxes, crop centres, caption positions |
+| `graphics/*.webm` | review / render | cached HyperFrames renders |
+| `review/sheet_*.png`, `review/review.json` | review | the preview and its approval state |
+| `render/qc_report.json` | render | QC: duration, A/V offset, loudness, chapter warnings |
+| `manifest.json` | every stage | per stage: cache key, outputs, completion time |
+
+The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
+`broll_index.md`, `.llmve_broll/`).
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `review` warns "graphic gNNN could not be rendered" | run `uv run llmve graphics doctor`; it lists Node, npm, the toolchain and libvpx. `--install` fetches the toolchain |
+| HyperFrames needs Node.js 22+ | install Node 22 or newer (nodejs.org, `brew install node`, or your package manager) |
+| HyperFrames can't download Chrome (offline, proxy) | set `HYPERFRAMES_BROWSER_PATH` to an existing Chrome/Chromium binary |
+| `npm install` fails fetching onnxruntime CUDA binaries | `llmve graphics doctor --install` already skips them; when installing by hand, set `npm_config_onnxruntime_node_install_cuda=skip` |
+| Graphics render with a black background | your FFmpeg lacks the `libvpx-vp9` decoder (`ffmpeg -decoders \| grep vpx`); install a standard build |
+| `geometry` says `detector: none` | `uv sync --extra vision` (plus `apt install libegl1` on Linux) |
+| `render` stops (exit 2): "No review sheet", "The cut changed since it was reviewed" or "Review status is 'rejected'" | run `llmve review <ws>` and `llmve review approve <ws>`; any edit to the cut needs a fresh review |
+| Chapters don't show on YouTube | read the chapter warnings in `qc_report.json`: first at 0:00, at least 3, each 10 s or more |
+| Non-English speech transcribed badly | `--asr-model large-v3-turbo --language <code>` (the default model is English-only) |
 
 ## Programmatic use
 
@@ -270,10 +332,14 @@ print(final["output"], final["qc_passed"])
 ## Development
 
 ```bash
-uv sync --extra dev --extra vision   # MediaPipe needs libegl1 on Linux
+uv sync --extra dev --extra vision       # MediaPipe needs libegl1 on Linux
 uv run ruff check .
-uv run pytest                        # or: uv run pytest tests/unit -q
+uv run pytest                            # or: uv run pytest tests/unit -q
+uv run llmve graphics doctor --install   # optional: enables the real HyperFrames tests
 ```
+
 The integration tests generate synthetic multi-camera media with ffmpeg and
-check A/V sync with flash/beep markers, -14 LUFS output, the review gate and
-the full CLI run. ASR, the LLM and the face detector are replaced by fakes.
+check A/V sync with flash/beep markers, -14 LUFS output, the review gate,
+graphics alpha compositing and the full CLI run. ASR, the LLM, the face
+detector and HyperFrames are replaced by fakes; the tests marked `hyperframes`
+run the real CLI and are skipped when the toolchain is not installed.
