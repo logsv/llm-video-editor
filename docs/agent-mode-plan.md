@@ -61,11 +61,21 @@ user brief / notes
 One tool server serves both hosts, so interactive and one-command runs behave the
 same. Everything runs locally; only text and requested stills go to the model.
 
+- Built by wrapping the existing tested stages (watch, plan, cut-audit, geometry,
+  review, render, publish, media, graphics, music): no parallel implementation.
+  Rules move out of them into parameters; their correctness code stays.
+- A future local API / frontend calls the same tool server and the same agent entry
+  point (`llmve agent` as a library function), with no CLI-only logic.
+- The existing skills (`edit-video`, `refine-edit`, `youtube-edit`, `youtube-shorts`,
+  `royalty-free-media`, `motion-graphics`, `youtube-publish`) are rewritten to drive the
+  agent tools; notes in chat keep working through `refine-edit`.
+
 ## 2. The toolbox (instruments, no decisions)
 
 Looking (read-only):
 - project overview: clips, durations, speech/no speech, devices, GPS, dates
-- transcript with word times; speech map (words and silences); re-transcribe a range with a bigger model and a name list
+- transcript with word times in the spoken language (Hindi, English, Hinglish; detected or forced); speech map (words and silences, voice activity, not just loudness); re-transcribe a range with a bigger model and a name list
+- location track: GPS per clip (and per point where the file has a track), place names via opt-in reverse geocoding, route order; recording times across cameras with clock-offset correction
 - frames and contact sheets for any clip and time window (images, logged)
 - measurements per scene: exposure, white balance, saturation, noise, shake, motion, faces, scene-change scores
 - audio: loudness, peaks, noise floor, music/speech detection, beat times
@@ -76,7 +86,8 @@ Editing (validated, versioned, undoable; every call carries a reason):
 - framing: crop, zoom/punch-in, vertical reframing
 - colour: correction per clip (from measurements), match clips, looks (parameters, curves, LUT)
 - transitions per cut: hard cut, crossfade, dip to black, whip/slide, J-cut, L-cut
-- audio: noise reduction, EQ, levels; music, sound effects, voice-over; ducking depth
+- audio: noise reduction (wind, engine), EQ, levels; music, sound effects, voice-over (recorded by the user, or local TTS with disclosure); ducking that follows speech from both the clips' own voice and the voice-over (speech detected by voice activity, so wind or engine noise does not hold the music down), depth and timing set by the agent
+- deliverables: several outputs per project (the 10-minute video plus Shorts from the same footage), each with its own edit, render and publish package
 - cutaways (licensed search or exact placement), graphics (HyperFrames), captions, chapters
 
 Checking and delivery:
@@ -104,9 +115,10 @@ These are advice the agent weighs, not rules code enforces.
 1. Frame-accurate timing; nothing outside a clip's real duration; valid output files.
 2. Never modify or delete the user's footage; outputs go to the project folder.
 3. No video files or streams to the model; stills only through the frame tool (or none in `text-only`).
-4. Licensed media only (commercial use and editing allowed); every third-party asset has a credit.
-5. Captions say what was said.
-6. Budgets: tokens, time, iterations per run.
+4. Licensed media only (commercial use and editing allowed); every third-party asset has a credit; copyrighted music detected in the original audio is flagged before publish.
+5. Disclosure: AI-generated narration, B-roll or images are marked for YouTube's altered/synthetic content question.
+6. Captions say what was said, in the language it was said.
+7. Budgets: tokens, time, iterations per run; agent-written code runs only inside the project folder and its own virtual environment.
 
 Everything the current code decides by rule (pause thresholds, cutaway budgets, music
 volume, caption style, crop centre, chapter rules, cut-audit auto-fixes) moves to tool
@@ -119,7 +131,7 @@ parameters or handbook advice.
 3. Plan: story, structure, length, look, sound, inserts; written to the log, auto-approved.
 4. Edit: tool calls, workshop scripts, sub-agent briefs, each producing a new version.
 5. Self-review: draft render, cut strips, continuity, loudness, safe areas; fix and repeat until satisfied or out of budget.
-6. Deliver: final render, review copy, publish package, decision log (`decisions.md`), gotchas update.
+6. Deliver: final render, review copy, publish package (upload.md next to the video: SEO titles, description with chapters and credits, tags, location details, three honest click-worthy thumbnails), decision log (`decisions.md`), cost report, gotchas update. Uploading to YouTube itself stays manual.
 7. Notes from the user restart at step 4.
 
 ## 6. Model, cost, caching
@@ -147,6 +159,60 @@ parameters or handbook advice.
 - Expect mostly riding and scenery with some talking, so it exercises P1 (scene understanding) and P4 (visual story) most.
 - Check: a 10-minute cut with a route story, consistent colour across cameras, transitions that fit location changes, music under riding, the user's voice clear where they talk, chapters by place, credits complete, decision log readable.
 - The user's notes from this run seed the style profile and the first gotchas.
+
+
+## 9. Requirements traceability
+
+Every requirement given during planning, and where the plan covers it.
+
+| # | Requirement | Where in the plan |
+|---|---|---|
+| R1 | Long-form YouTube editing from raw footage | Goal, sections 2, 5; first test |
+| R2 | Use through Claude Code skills/commands; Claude workspace is the primary way | Section 1 (hosts, skills rewritten) |
+| R3 | One command end to end, auto-approved | `llmve agent`, decisions table, section 5 |
+| R4 | Interactive improvement from notes, with the right skills and tool calls | Section 1 (`refine-edit`), section 5 step 7 |
+| R5 | The agent decides everything (scenes, colour, transitions, clip creation, ...); code is only its instruments | Goal, section 4 (rules moved to parameters/advice) |
+| R6 | The agent may install libraries and write code | Workshop (section 2), guardrail 7 |
+| R7 | No video uploaded to the cloud; some stills to the model are fine | Decisions table, guardrail 3 |
+| R8 | Royalty-free music and SFX; YouTube Audio Library / Creator Music (no API: manual registration) | Section 2 (audio, cutaways), guardrail 4 |
+| R9 | Royalty-free B-roll and funny clips, only when needed, licensed sources only | Section 2 (cutaways), handbook advice on restraint |
+| R10 | Music ducking under both the voice-over and the video's own voice | Section 2 (audio) |
+| R11 | Upload markdown next to the video: SEO title/description, music credits, location, details, three thumbnails | Section 5 step 6 |
+| R12 | HyperFrames for graphics | Section 1 (renderer), reference table |
+| R13 | Local API / frontend later, kept in scope | Section 1 |
+| R14 | Enhance existing code, do not duplicate it | Section 1 (wrap existing stages) |
+| R15 | Shorts / vertical as well as long-form | Section 2 (deliverables, vertical reframing) |
+| R16 | First test: Bhopal -> Khajuraho, 10 minutes, on the user's Mac | Section 8 |
+| R17 | Captions (.srt), chapters, -14 LUFS loudness kept from the current pipeline | Section 2 (checking and delivery), handbook |
+
+## 10. Edge cases
+
+| Area | Case | Handling | Phase |
+|---|---|---|---|
+| Footage | Mixed cameras: phone (variable frame rate, HDR HLG/Dolby Vision), action cam (fisheye, 60/120 fps, 10-bit HEVC), drone (log profile), helmet/dash cam | Measurement tools report colour space, transfer, frame rate and lens; colour tool tone-maps HDR/log to SDR before grading; high-fps clips offered as slow motion | P1, P2 |
+| Footage | Action-cam recordings split across files (e.g. GoPro chapters every ~4 GB) | Overview detects chapter sequences and treats them as one continuous recording | P0 |
+| Footage | Rotation metadata, odd sizes, corrupt or partial files, clips without audio, mono/5.1, 44.1/48 kHz | Probe reports them; corrupt files are skipped with a warning; audio normalised in the renderer (already done) | P0 |
+| Footage | Hours of riding (very large total) | Proxies and sampled analysis first, detail only where the agent looks; caching; progress reporting; disk-space check before proxies and renders | P1 |
+| Footage | Clock differences between cameras, time zones | Offset correction from GPS/time tags or a shared moment; order by corrected time for the route | P1 |
+| Footage | Duplicate or near-duplicate clips | Detected and reported; the agent chooses | P1 |
+| Footage | Too little usable footage for the target length, or far too much | The agent reports and decides (shorter cut, slower pacing, more scenery); never pads with filler silently | P3 |
+| Audio | Wind and engine noise on a bike; speech under a helmet | Noise reduction tool; ASR on cleaned audio; voice activity detection for the speech map and ducking | P1, P2 |
+| Audio | Copyrighted music in the background (radio, temple loudspeakers, a cafe) | Music detection in original audio; flagged in the decision log and publish warnings; the agent mutes, ducks or replaces | P1 |
+| Language | Hindi or mixed Hindi-English speech | Language-aware ASR model; captions and upload copy in the chosen language(s); Devanagari-capable fonts for captions, graphics and thumbnails | P1, P2 |
+| Privacy | Faces of strangers, number plates | Optional blur tool the agent can use; handbook advice | P2 |
+| Privacy | Location in public metadata | GPS read locally; reverse geocoding and location in copy stay opt-in (as today) | P0 |
+| Agent | Model refusal, rate or usage limits (long runs on a Claude subscription), network loss mid-run | Every step versioned; `llmve agent --resume` continues from the last version; the rule-based fallback can finish the edit | P3 |
+| Agent | Invalid tool calls, endless loops, budget running out mid-edit | Tools return errors the agent can fix; iteration and token caps; finish with the best version so far and say what is missing | P3 |
+| Agent | Runs differ between attempts | Decision log, installed packages and scripts recorded; recorded runs replayable in tests | P3, P5 |
+| Agent | Headless `claude -p` needs tool permissions | Define the allowed tools and working folder for agent runs explicitly; nothing outside the project folder | P0 |
+| Code | Agent-written scripts and installed packages | Project virtual environment only (pinned versions), never global installs; scripts cannot touch the footage folder except to read | P2 |
+| Code | User edits the edit while the agent runs | Version check before each write; conflicting writes rejected and reported | P0 |
+| Render | 10-minute 4K render times, transitions forcing re-encodes | Draft renders at low resolution for self-review; hardware encoders; final render once | P2 |
+| Render | Self-review on edits with hundreds of cuts | Sampled cut strips plus every cut the audit flags | P3 |
+| Data | Existing checkpoints and edit files | Schema changes versioned with tests and `llmve schema` output, as CLAUDE.md requires | P0 |
+| Delivery | Several deliverables from one trip (long video plus Shorts) | Separate edits per deliverable in one project, sharing analysis | P3 |
+| Delivery | AI narration or generated B-roll | Disclosure flag in the publish package | P3 |
+| Cost | Visibility of model spend | Per-run token and cost report next to the decision log | P3 |
 
 ## Open
 
