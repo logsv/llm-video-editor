@@ -13,8 +13,18 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
-from ..schemas import EDL, ClipsManifest, CutAudit, EDLClip, Transcript, Violation, Word
+from ..schemas import (
+    EDL,
+    ClipsManifest,
+    CutAudit,
+    EDLClip,
+    Graphic,
+    Transcript,
+    Violation,
+    Word,
+)
 from ..workspace import Workspace
 from .pacing import apply_pacing
 
@@ -193,7 +203,8 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
 
     # -- pacing (after the editorial fixes, so splits land inside audited clips) -----
     words_for = {ct.clip_id: ct.words() for ct in transcript.clips}
-    kept, paced_overlays, removed = apply_pacing(edl, kept, words_for, list(edl.overlays))
+    kept, paced_overlays, paced_graphics, removed = apply_pacing(
+        edl, kept, words_for, list(edl.overlays), list(edl.graphics))
 
     # -- overlays ---------------------------------------------------------------------
     by_id = {c.clip_id: c for c in kept}
@@ -218,7 +229,8 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
         overlays.append(ov.model_copy(update={
             "offset": round(offset, 3), "duration": round(dur, 3), "src_start": round(src_start, 3)}))
 
-    audited = edl.model_copy(update={"clips": kept, "overlays": overlays})
+    graphics = _audit_graphics(paced_graphics, kept, rec)
+    audited = edl.model_copy(update={"clips": kept, "overlays": overlays, "graphics": graphics})
     report = CutAudit(
         passed=not any(v.severity == "error" and not v.fixed for v in rec.items),
         violations=rec.items, clips_before=before_n, clips_after=len(kept),
@@ -226,6 +238,47 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
         target_duration=target, tolerance=cfg.tolerance, pauses_removed=removed,
     )
     return audited, report
+
+
+def _audit_graphics(graphics: list[Graphic], clips: list[EDLClip], rec: _Recorder
+                    ) -> list[Graphic]:
+    """Drop graphics with a missing anchor or source; keep each inside the timeline."""
+    from ..hyperframes.compose import templates
+
+    starts, t = {}, 0.0
+    for c in clips:
+        starts[c.clip_id] = t
+        t += c.duration
+    total, known = t, templates()
+    out = []
+    for g in graphics:
+        if g.template is not None and g.template not in known:
+            rec.add("unknown_graphic", None, f"graphic {g.graphic_id}: no template {g.template!r} "
+                    f"(have {', '.join(sorted(known))})", fixed=True, fix="dropped graphic")
+            continue
+        if g.composition is not None and not (Path(g.composition).expanduser() / "index.html"
+                                              ).exists():
+            rec.add("unknown_graphic", None, f"graphic {g.graphic_id}: {g.composition} has no "
+                    "index.html", fixed=True, fix="dropped graphic")
+            continue
+        if g.anchor_clip_id not in starts:
+            rec.add("graphic_out_of_bounds", None,
+                    f"graphic {g.graphic_id}: anchor {g.anchor_clip_id} is not in the cut",
+                    fixed=True, fix="dropped graphic")
+            continue
+        at = starts[g.anchor_clip_id] + max(0.0, g.offset)
+        dur = min(g.duration, total - at)
+        if dur < 0.5:
+            rec.add("graphic_out_of_bounds", None, f"graphic {g.graphic_id} has no room",
+                    fixed=True, fix="dropped graphic")
+            continue
+        if dur < g.duration or g.offset < 0:
+            rec.add("graphic_out_of_bounds", None,
+                    f"graphic {g.graphic_id} ran past the end of the cut", fixed=True,
+                    fix=f"{dur:.2f}s from {at:.2f}s")
+        out.append(g.model_copy(update={"offset": round(max(0.0, g.offset), 3),
+                                        "duration": round(dur, 3)}))
+    return out
 
 
 def run_cut_audit(ws: Workspace, edl: EDL | None = None, cfg: AuditConfig = AuditConfig()

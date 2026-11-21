@@ -41,6 +41,9 @@ edit `edl_raw.json` yourself (times only from `transcript.json`):
   live demos untightened by giving them `"role": "broll"`.
 - **Caption fixes**: `"captions": {"enabled": false, "replacements": {"cloud": "Claude"}}`
   (long-form uploads the SRT instead of burning text in).
+- **Graphics** (optional, `motion-graphics` skill): `uv run llmve graphics chapters <ws>`
+  for chapter title cards, a `lower-third` with the speaker's name in the first
+  minute, `callout`s for key numbers.
 Post a short table (clip, source range, length, chapter) and the runtime.
 
 ## 4. Audit, geometry, review

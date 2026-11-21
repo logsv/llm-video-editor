@@ -18,6 +18,8 @@ ViolationKind = Literal[
     "too_short",
     "duration_budget",
     "overlay_out_of_bounds",
+    "graphic_out_of_bounds",
+    "unknown_graphic",
 ]
 
 

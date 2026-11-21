@@ -84,7 +84,7 @@ where = ["."]
 include = ["llm_video_editor*"]
 
 [tool.setuptools.package-data]
-llm_video_editor = ["py.typed"]
+llm_video_editor = ["py.typed", "hyperframes/templates/*.html"]
 
 # Ruff (lint + import sorting)
 [tool.ruff]
@@ -115,6 +115,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "hyperframes: needs Node 22+ and the pinned HyperFrames toolchain (llmve graphics doctor --install)",
 ]
 
 # Coverage configuration
