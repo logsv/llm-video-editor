@@ -42,6 +42,19 @@ uv run llmve auto ./raw_clips/ -p "10 minute YouTube edit: the three key ideas" 
 # -> final.mp4, final.srt, final.chapters.txt, final.upload.md, final.thumb1-3.jpg
 ```
 
+Example, a 10-minute travel vlog with Hindi narration:
+
+```bash
+uv run llmve auto "$HOME/Videos/Bhopal to Khajuraho" -t youtube --target-duration 10m \
+    -p "solo bike trip vlog, Bhopal to Khajuraho: the ride, roadside stops, the temples" \
+    --asr-model large-v3-turbo --language hi --name "Your Name|Solo rider" \
+    --music-query "acoustic travel" -o "$HOME/Movies/bhopal-khajuraho.mp4"
+```
+
+It builds the story from what you say on camera; long silent riding shots come in
+as cutaways, so mostly silent footage gives a shorter video (see
+[Limitations](#limitations)).
+
 `auto` runs every stage, picks pacing, captions, chapters, a ducked licensed music
 bed, a few cutaways where they help and graphics, approves its own review sheet
 (kept for reference; `--review` stops there instead), renders and writes the
@@ -76,6 +89,27 @@ uv run llmve graphics doctor --install    # optional: motion graphics (needs Nod
 Motion graphics are not a Python extra: `llmve graphics doctor --install`
 installs a pinned HyperFrames + GSAP with npm into `~/.cache/llmve` (see
 [Motion graphics](#motion-graphics-hyperframes)).
+
+### Run it where your footage is (macOS example)
+The editor reads your video files directly, so run it on the computer that has
+them. A cloud Claude session cannot see files on your laptop unless the folder
+is shared with it through Remote Control (Claude desktop app > Settings >
+Claude Code > Remote Control).
+
+```bash
+brew install ffmpeg uv node          # Node 22+ only for motion graphics
+git clone https://github.com/logsv/llm-video-editor.git && cd llm-video-editor
+uv sync --extra dev --extra vision   # vision = face tracking for vertical crops
+uv run llmve graphics doctor --install
+claude                               # Claude Code in this folder, then /edit-video ...
+```
+
+- The default planner (`--provider claude-cli`) uses your Claude Code login: no
+  API key needed. `ollama`, `anthropic` and `openai` are alternatives.
+- The first `watch` downloads the speech model (`distil-large-v3`, about 1.5 GB,
+  English only). For other languages use `--asr-model large-v3-turbo --language <code>`.
+- Optional keys for stock video search: `export PIXABAY_API_KEY=...`,
+  `export PEXELS_API_KEY=...` (free accounts). Music search (Openverse) needs none.
 
 ## How it works
 
@@ -406,6 +440,23 @@ Everything for one batch of inputs lives in `.llmve/<batch_hash>/` (set
 The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
 `broll_index.md`, `.llmve_broll/`).
 
+## Limitations
+
+- **The cut follows speech.** The planner builds the main timeline from what is
+  said in talking-head clips. Clips without speech (riding footage, scenery) are
+  used only as cutaways the planner places over speech; if *no* clip has speech it
+  makes a montage instead. So a mostly silent travel video comes out shorter than
+  the target, and `cut-audit` reports it as under the duration budget.
+- **Length is capped by the footage**: the target can't exceed the speech
+  available (plus 15% for natural pauses).
+- **One cut per workspace**: make Shorts one after another.
+- **Online media needs network**: music and stock search reach Openverse, Pixabay,
+  Pexels and Wikimedia; YouTube's Audio Library / Creator Music has no API
+  (download there, register with `llmve media add`).
+- **Automatic approval**: `auto` and `finish` approve their own review sheet;
+  look at `review/sheet_*.png` and the thumbnails before you upload, or use
+  `--review` to stop at the sheet.
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -421,6 +472,9 @@ The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
 | `media search` says a provider needs a key | set `PIXABAY_API_KEY` / `PEXELS_API_KEY` (free accounts); Openverse and Wikimedia need none |
 | Music barely dips, or dips all the time | it follows speech automatically; set `"mix": {"duck_depth_db": 8-18}` in `edl_raw.json` to change the depth |
 | `publish` warns "no licence/credit recorded" | register the file with `llmve media add` (or remove it from the cut) before uploading |
+| The video is much shorter than the target | most footage has no speech; see [Limitations](#limitations). Narrate over silent clips (`llmve music add ... --role voiceover`) or keep it shorter |
+| Claude (cloud session) cannot find my video folder | run on the computer that has the files (see [Run it where your footage is](#run-it-where-your-footage-is-macos-example)) or share the folder through Remote Control |
+| First run is slow before anything happens | the speech model downloads once (about 1.5 GB); long recordings are transcribed in parallel chunks |
 | Non-English speech transcribed badly | `--asr-model large-v3-turbo --language <code>` (the default model is English-only) |
 
 ## Programmatic use
