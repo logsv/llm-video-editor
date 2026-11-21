@@ -1,80 +1,37 @@
 # LLM Video Editor
 
-## Project Overview
-An intelligent, prompt-driven video router/editor that processes video content and outputs platform-ready cuts for YouTube (16:9) and Instagram Reels (9:16).
+Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
+16:9, Reels/TikTok 9:16), through checkpointed stages.
 
-## Architecture
-- **Ingest**: Process single files or directories, probe media, cache audio/frames
-- **Understand**: ASR transcription, optional OCR, scene detection
-- **Plan**: LLM-driven EDL generation based on user prompts
-- **Edit**: Apply cuts, reframe for aspect ratios, add captions, normalize audio
-- **Render**: Export platform-specific formats with quality checks
+## Pipeline (each stage = one tested module + one CLI command)
+`watch` → `plan` → `b-roll-select` → `cut-audit` → `take-geometry` → `review-gate` → `render`
 
-## Technology Stack
-- **Language**: Python 3.11
-- **Framework**: LangGraph for agent orchestration
-- **ASR**: faster-whisper or WhisperX
-- **Scene Detection**: PySceneDetect or TransNetV2
-- **LLM**: Llama 3.1/3.2, Qwen2.5-VL, or Mixtral-8x7B
-- **Video Processing**: MoviePy + FFmpeg with NVENC acceleration
-- **Export**: OpenTimelineIO (OTIO) for professional interchange
+- Code: `llm_video_editor/stages/*.py`; ffmpeg wrappers in `llm_video_editor/ffmpeg/`;
+  checkpoint schemas in `llm_video_editor/schemas/`; LLM providers in `llm_video_editor/llm/`.
+- Checkpoints live in `.llmve/<batch_hash>/` (see README for the file list).
+- CLI: `uv run llmve --help`. The entry skill for editing requests is
+  `.claude/skills/edit-video/SKILL.md`; `youtube-edit` (long-form 16:9) and
+  `youtube-shorts` (vertical clips) specialise it.
+- Long-form options live on the EDL: `pacing` (jump-cut tightening/punch-ins,
+  applied in `stages/pacing.py` at the end of cut-audit), `EDLClip.zoom`,
+  `EDLClip.chapter` (`stages/chapters.py`), `captions.replacements`.
 
-## Environment Setup with uv (Recommended)
+## Rules for working in this repo
+- Never read raw media (`*.mp4`, `*.mov`, `*.wav`, ...); use JSON checkpoints and
+  contact sheets (`sheets/*.png`, `review/sheet_*.png`).
+- Planner prompts carry text only (clip ids, transcript segments, B-roll
+  descriptions). `llm.base.assert_text_only` enforces it; keep it that way.
+- The LLM never invents timestamps: it selects segment ids, resolved locally.
+- Run ffmpeg through `llm_video_editor.ffmpeg.runner` (argv lists, never `shell=True`).
+- Do not approve a review or pass `--skip-review` / `--approve` unless the user asked.
+- Checkpoint schema changes: bump nothing silently; update the model, its tests
+  and `llmve schema` output together.
+
+## Development
 ```bash
-# Install uv (if not already installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-# Or: brew install uv
-
-# Setup project environment
-./setup_environment.sh
-
-# Manual setup alternative
-uv python install 3.11  # Install Python 3.11
-uv sync                  # Create environment and install dependencies
-uv add --optional pro    # Install pro polish features (YOLO, Demucs, etc.)
+uv sync --extra dev --extra vision   # MediaPipe needs libegl1 on Linux
+uv run ruff check .
+uv run pytest                        # synthetic media; ASR/LLM/detector are faked
 ```
-
-## Legacy conda setup (Alternative)
-```bash
-# Create conda environment
-conda create -n llm-video-editor python=3.11
-conda activate llm-video-editor
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-## Usage
-```bash
-# With uv (recommended)
-uv run llm-video-router --in ./videos --prompt "60s reel: top 3 takeaways, captions, upbeat" --target reels
-
-# Direct execution (if activated)
-llm-video-router --in ./videos --prompt "60s reel: top 3 takeaways, captions, upbeat" --target reels
-```
-
-## Development Commands
-- `uv run pytest tests/` - Run tests
-- `uv run llm-video-router --help` - Show CLI help
-- `uv add package-name` - Add new dependency
-- `uv sync` - Sync dependencies with pyproject.toml
-- `uv python list` - List available Python versions
-
-## Claude Code skills (long-form YouTube)
-- `/youtube-edit` (`.claude/skills/youtube-edit/`): raw long recording -> 16:9 YouTube cut, chapters, SRT, -14 LUFS.
-  Claude reads the full transcript and writes `projects/<slug>/edl.json`; `llm_video_editor/longform/` renders it.
-- `/youtube-shorts` (`.claude/skills/youtube-shorts/`): best moments of a long video -> 9:16 clips.
-- Tools: `uv run --no-project --with faster-whisper python -m llm_video_editor.longform {ingest,render}`
-  (only needs ffmpeg + faster-whisper; the rest of the repo's heavy deps are not required).
-- Tests: `python -m pytest tests/test_longform.py -o addopts=""`.
-- `projects/` holds media and renders and is gitignored.
-
-## Dependencies
-See requirements.txt for full list of dependencies including:
-- langgraph
-- faster-whisper
-- scenedetect
-- moviepy
-- opentimelineio
-- torch
-- transformers
+Python 3.11+, FFmpeg with libass/libfreetype. Optional extras: `vision`, `pro`,
+`gen`, `graph`, `anthropic`, `openai`.

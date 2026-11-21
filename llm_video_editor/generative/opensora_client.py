@@ -1,5 +1,8 @@
 from __future__ import annotations
-import os, shlex, subprocess, uuid
+import os
+import shlex
+import subprocess
+import uuid
 from pathlib import Path
 
 class OpenSoraClient:
@@ -19,11 +22,10 @@ class OpenSoraClient:
         outfile = outdir / f"t2v_{uuid.uuid4().hex[:8]}.mp4"
         
         if self.cmd:
-            cmd = (
-                f"{self.cmd} --prompt {shlex.quote(prompt)} --fps {fps} "
-                f"--seconds {seconds} --resolution {resolution} --out "
-                f"{shlex.quote(str(outfile))}"
-            )
+            cmd = shlex.split(self.cmd) + [
+                "--prompt", prompt, "--fps", str(fps), "--seconds", str(seconds),
+                "--resolution", resolution, "--out", str(outfile),
+            ]
             self._run(cmd)
             return outfile
         elif self.host:
@@ -72,7 +74,7 @@ class OpenSoraClient:
             raise RuntimeError("FFmpeg not found. Please install FFmpeg to create test videos.")
 
     @staticmethod
-    def _run(cmd: str):
-        proc = subprocess.run(cmd, shell=True)
+    def _run(cmd: list[str]):
+        proc = subprocess.run(cmd)
         if proc.returncode != 0:
-            raise RuntimeError(f"Command failed: {cmd}")
+            raise RuntimeError(f"Command failed: {cmd[0]} (exit {proc.returncode})")

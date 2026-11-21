@@ -1,8 +1,8 @@
 """
 Platform-specific presets and specifications for video export.
 """
-from typing import Dict, Any, List
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -23,7 +23,7 @@ class PlatformSpec:
 PLATFORM_SPECS = {
     "youtube": PlatformSpec(
         name="YouTube",
-        max_duration=3600,  # 1 hour
+        max_duration=43200,  # 12 hours (YouTube's upload limit)
         aspect_ratio="16:9",
         resolution="1920x1080",
         typical_duration=600,  # 10 minutes
@@ -32,7 +32,19 @@ PLATFORM_SPECS = {
         video_codec="h264",
         quality_preset="high"
     ),
-    
+
+    "shorts": PlatformSpec(
+        name="YouTube Shorts",
+        max_duration=180,  # 3 minutes
+        aspect_ratio="9:16",
+        resolution="1080x1920",
+        typical_duration=45,
+        subtitle_style="center_overlay",
+        audio_format="aac",
+        video_codec="h264",
+        quality_preset="medium"
+    ),
+
     "reels": PlatformSpec(
         name="Instagram Reels",
         max_duration=90,
@@ -44,7 +56,7 @@ PLATFORM_SPECS = {
         video_codec="h264",
         quality_preset="medium"
     ),
-    
+
     "tiktok": PlatformSpec(
         name="TikTok",
         max_duration=180,  # 3 minutes
@@ -56,7 +68,7 @@ PLATFORM_SPECS = {
         video_codec="h264",
         quality_preset="medium"
     ),
-    
+
     "twitter": PlatformSpec(
         name="Twitter",
         max_duration=140,
@@ -68,7 +80,7 @@ PLATFORM_SPECS = {
         video_codec="h264",
         quality_preset="medium"
     ),
-    
+
     "linkedin": PlatformSpec(
         name="LinkedIn",
         max_duration=600,  # 10 minutes
@@ -83,20 +95,20 @@ PLATFORM_SPECS = {
 }
 
 
-def get_platform_specs(platform: str) -> Dict[str, Any]:
+def get_platform_specs(platform: str) -> dict[str, Any]:
     """
     Get platform specifications.
-    
+
     Args:
         platform: Platform name (youtube, reels, tiktok, etc.)
-        
+
     Returns:
         Dictionary with platform specifications
     """
     platform_lower = platform.lower()
     if platform_lower not in PLATFORM_SPECS:
         raise ValueError(f"Unknown platform: {platform}. Available: {list(PLATFORM_SPECS.keys())}")
-    
+
     spec = PLATFORM_SPECS[platform_lower]
     return {
         "name": spec.name,
@@ -111,25 +123,25 @@ def get_platform_specs(platform: str) -> Dict[str, Any]:
     }
 
 
-def get_available_platforms() -> List[str]:
+def get_available_platforms() -> list[str]:
     """Get list of available platform names."""
     return list(PLATFORM_SPECS.keys())
 
 
-def get_ffmpeg_preset(platform: str, gpu_acceleration: bool = True) -> Dict[str, Any]:
+def get_ffmpeg_preset(platform: str, gpu_acceleration: bool = True) -> dict[str, Any]:
     """
     Get FFmpeg encoding preset for platform.
-    
+
     Args:
         platform: Target platform
         gpu_acceleration: Whether to use GPU acceleration (NVENC)
-        
+
     Returns:
         Dictionary with FFmpeg parameters
     """
     spec = PLATFORM_SPECS[platform.lower()]
     width, height = map(int, spec.resolution.split('x'))
-    
+
     # Base preset
     preset = {
         "width": width,
@@ -140,7 +152,7 @@ def get_ffmpeg_preset(platform: str, gpu_acceleration: bool = True) -> Dict[str,
         "audio_sample_rate": 48000,
         "audio_bitrate": "128k"
     }
-    
+
     # Video codec and quality settings
     if gpu_acceleration:
         preset.update({
@@ -156,7 +168,7 @@ def get_ffmpeg_preset(platform: str, gpu_acceleration: bool = True) -> Dict[str,
             "profile": "main",
             "level": "4.1"
         })
-    
+
     # Quality-specific settings
     if spec.quality_preset == "high":
         preset.update({
@@ -179,9 +191,9 @@ def get_ffmpeg_preset(platform: str, gpu_acceleration: bool = True) -> Dict[str,
             "maxrate": "3M",
             "bufsize": "5M"
         })
-    
+
     # Platform-specific optimizations
-    if platform.lower() in ["reels", "tiktok"]:
+    if platform.lower() in ["reels", "tiktok", "shorts"]:
         # Mobile-optimized settings
         preset["movflags"] = "+faststart"
         preset["tune"] = "film"
@@ -189,22 +201,22 @@ def get_ffmpeg_preset(platform: str, gpu_acceleration: bool = True) -> Dict[str,
         # YouTube-optimized settings
         preset["movflags"] = "+faststart"
         preset["tune"] = "film"
-    
+
     return preset
 
 
-def get_subtitle_style(platform: str) -> Dict[str, Any]:
+def get_subtitle_style(platform: str) -> dict[str, Any]:
     """
     Get subtitle styling for platform.
-    
+
     Args:
         platform: Target platform
-        
+
     Returns:
         Dictionary with subtitle style parameters
     """
     spec = PLATFORM_SPECS[platform.lower()]
-    
+
     if spec.subtitle_style == "center_overlay":
         return {
             "position": "center",
@@ -249,58 +261,58 @@ def validate_platform_constraints(
     duration: float,
     width: int,
     height: int
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Validate content against platform constraints.
-    
+
     Args:
         platform: Target platform
         duration: Video duration in seconds
         width: Video width in pixels
         height: Video height in pixels
-        
+
     Returns:
         Dictionary with validation results
     """
     spec = PLATFORM_SPECS[platform.lower()]
     target_width, target_height = map(int, spec.resolution.split('x'))
-    
+
     # Calculate aspect ratios
     current_aspect = width / height
     target_aspect_parts = spec.aspect_ratio.split(':')
     target_aspect = int(target_aspect_parts[0]) / int(target_aspect_parts[1])
-    
+
     validation = {
         "valid": True,
         "warnings": [],
         "errors": []
     }
-    
+
     # Check duration
     if duration > spec.max_duration:
         validation["errors"].append(
             f"Duration {duration:.1f}s exceeds platform maximum of {spec.max_duration}s"
         )
         validation["valid"] = False
-    
+
     # Check aspect ratio (allow some tolerance)
     aspect_tolerance = 0.1
     if abs(current_aspect - target_aspect) > aspect_tolerance:
         validation["warnings"].append(
             f"Aspect ratio {current_aspect:.2f} differs from platform standard {target_aspect:.2f}"
         )
-    
+
     # Check resolution
     if width != target_width or height != target_height:
         validation["warnings"].append(
             f"Resolution {width}x{height} differs from platform standard {spec.resolution}"
         )
-    
+
     # Platform-specific checks
-    if platform.lower() in ["reels", "tiktok"]:
+    if platform.lower() in ["reels", "tiktok", "shorts"]:
         if duration < 5:
             validation["warnings"].append("Very short duration may not perform well on this platform")
         if duration > spec.typical_duration * 2:
             validation["warnings"].append("Long duration may reduce engagement on this platform")
-    
+
     return validation

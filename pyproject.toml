@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-video-editor"
-version = "0.2.0"
-description = "Intelligent, prompt-driven video router/editor with LLM-based planning and pro polish features"
+version = "0.3.0"
+description = "Checkpointed, prompt-driven video editor: watch, plan, cut-audit, geometry, review, render"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -26,68 +26,58 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 
-# Core dependencies
+# Core dependencies: the stage pipeline (watch -> plan -> cut-audit -> render).
+# Heavy ML stacks live in extras so the core installs in seconds.
 dependencies = [
-    "langgraph==0.2.34",
-    "langchain==0.3.1",
-    "langchain-openai==0.2.1",
-    "faster-whisper==1.0.3",
-    "scenedetect==0.6.4",
-    "moviepy==1.0.3",
-    "opentimelineio==0.17.0",
-    "torch==2.4.1",
-    "torchaudio==2.4.1",
-    "transformers==4.45.2",
-    "click==8.1.7",
-    "tqdm==4.66.5",
-    "python-dotenv==1.0.1",
-    "pydantic==2.9.2",
-    "requests==2.32.3",
-    "numpy==1.26.4",
-    "opencv-python==4.10.0.84",
-    "Pillow==10.4.0",
-    "pytest-cov>=6.0.0",
-    "diffusers>=0.29.0",
-    "accelerate>=0.31.0",
-    "rich>=13.7.0",
+    "pydantic>=2.7,<3",
     "typer>=0.12.3",
+    "rich>=13.7.0",
+    "requests>=2.32",
+    "faster-whisper>=1.0.3",
 ]
 
 [project.optional-dependencies]
-# Pro polish features (optional for advanced functionality)
+# Face/subject geometry (take-geometry). MediaPipe is CPU-friendly.
+vision = [
+    "mediapipe>=0.10.14",
+    "opencv-python-headless>=4.10",
+]
+# Pro polish: YOLO person fallback, music ducking.
 pro = [
-    "ultralytics==8.3.4",  # YOLO models for object detection
-    "demucs==4.0.1",       # Audio source separation for music ducking
-    "librosa==0.10.2",     # Audio analysis and processing
-    "soundfile==0.12.1",   # Audio file I/O
-    # "yolox==0.3.0",        # ByteTrack for object tracking (optional, has build issues)
+    "ultralytics>=8.3.4",
+    "demucs>=4.0.1",
+    "librosa>=0.10.2",
+    "soundfile>=0.12.1",
 ]
-
-# Development and testing
+# Generative B-roll fallback (Open-Sora / Stable Video Diffusion).
+gen = [
+    "torch>=2.4",
+    "diffusers>=0.29.0",
+    "transformers>=4.45",
+    "accelerate>=0.31.0",
+    "Pillow>=10.4",
+]
+# Secondary planner providers (the default `claude-cli` provider needs no Python SDK).
+anthropic = ["anthropic>=0.40"]
+openai = ["openai>=1.40"]
+# LangGraph orchestration with a human-in-the-loop interrupt at the review gate.
+graph = ["langgraph>=0.2.34"]
 dev = [
-    "pytest==8.3.3",
-    "pytest-asyncio==0.24.0",
-    "pytest-cov==6.0.0",
-    "black==24.8.0",
-    "flake8==7.1.1",
-    "mypy==1.11.2",
+    "langgraph>=0.2.34",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.6",
 ]
-
-# Complete installation with all features
-all = [
-    "llm-video-editor[pro,dev]"
-]
+all = ["llm-video-editor[vision,pro,gen,anthropic,openai,graph]"]
 
 [project.scripts]
-llm-video-router = "llm_video_editor.cli:main"
-llm-video-editor = "llm_video_editor.cli:main"
-llm-longform = "llm_video_editor.longform.__main__:main"
+llmve = "llm_video_editor.cli.app:app"
+llm-video-router = "llm_video_editor.cli.app:app"
+llm-video-editor = "llm_video_editor.cli.app:app"
 
 [project.urls]
-Homepage = "https://github.com/your-org/llm-video-editor"
-Documentation = "https://docs.llm-video-editor.dev"
-Repository = "https://github.com/your-org/llm-video-editor"
-Issues = "https://github.com/your-org/llm-video-editor/issues"
+Repository = "https://github.com/logsv/llm-video-editor"
+Issues = "https://github.com/logsv/llm-video-editor/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -96,76 +86,27 @@ include = ["llm_video_editor*"]
 [tool.setuptools.package-data]
 llm_video_editor = ["py.typed"]
 
-# uv configuration
-[tool.uv]
-dev-dependencies = [
-    "pytest==8.3.3",
-    "pytest-asyncio==0.24.0",
-    "black==24.8.0",
-    "flake8==7.1.1",
-    "mypy==1.11.2",
-]
-
-# uv workspace configuration
-[tool.uv.workspace]
-members = ["."]
-
-# Black formatter configuration
-[tool.black]
+# Ruff (lint + import sorting)
+[tool.ruff]
 line-length = 100
-target-version = ['py311']
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | venv
-  | _build
-  | buck-out
-  | build
-  | dist
-)/
-'''
-
-# MyPy type checking configuration
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
-
-[[tool.mypy.overrides]]
-module = [
-    "cv2.*",
-    "moviepy.*",
-    "scenedetect.*",
-    "faster_whisper.*",
-    "ultralytics.*",
-    "demucs.*",
-    "librosa.*",
-    "soundfile.*",
-    "yolox.*",
+target-version = "py311"
+# Optional/legacy-style modules kept as-is (generative B-roll clients, music ducking).
+extend-exclude = [
+    "llm_video_editor/generative",
+    "llm_video_editor/audio/music_ducking.py",
 ]
-ignore_missing_imports = true
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 # Pytest configuration
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q --strict-markers --cov=llm_video_editor --cov-report=term-missing --cov-report=html"
+addopts = "-ra -q --strict-markers"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
@@ -175,7 +116,6 @@ markers = [
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
 ]
-asyncio_default_fixture_loop_scope = "function"
 
 # Coverage configuration
 [tool.coverage.run]

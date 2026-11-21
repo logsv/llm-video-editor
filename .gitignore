@@ -81,7 +81,6 @@ logs/
 *.jpg
 *.jpeg
 *.png
-//*.gif
 *.bmp
 *.tiff
 
@@ -121,7 +120,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
-*.lock
 
 # Logs
 *.log
@@ -139,8 +137,7 @@ rendered_*/
 test_output/
 temp_*/
 
-# Development and test files
-test_*.py
+# Development scratch files
 debug_*.py
 scratch_*.py
 experiment_*.py
@@ -172,5 +169,6 @@ edl_test.json
 .venv*/
 venv*/
 
-# Claude /youtube-edit projects (raw media, renders)
-projects/
+# Pipeline workspaces (checkpoints, contact sheets, renders)
+.llmve/
+llmvr_workspace/

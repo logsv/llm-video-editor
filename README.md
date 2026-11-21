@@ -1,429 +1,165 @@
 # LLM Video Editor
 
-An intelligent, prompt-driven video router/editor that processes video content and outputs platform-ready cuts for YouTube (16:9) and Instagram Reels (9:16). **Now fully functional with local LLM support using Ollama!** 🎉
+Prompt-driven video editing for YouTube (16:9) and Reels/TikTok (9:16). You
+point it at a clip or a folder of raw footage and describe the cut you want.
+It transcribes, plans and audits the cut, keeps captions and overlays off the
+speaker's face, shows you a preview sheet to approve, and then renders once,
+normalised to -14 LUFS.
 
-## 🎬 Features
-
-- **Intelligent Analysis**: Automatic speech recognition (ASR) with word-level timestamps using Whisper
-- **Scene Detection**: Smart boundary detection for optimal cuts using PySceneDetect
-- **Local LLM Planning**: AI-driven Edit Decision List (EDL) generation using Ollama (no API keys required!)
-- **Platform Optimization**: Pre-configured settings for YouTube (16:9), Instagram Reels (9:16), TikTok
-- **Professional Video Rendering**: GPU-accelerated video processing with FFmpeg
-- **Complete Offline Processing**: All processing runs locally - no external dependencies
-- **Smart Reframing**: Automatic aspect ratio conversion (16:9 to 9:16) with intelligent cropping
-- **Generative B-roll**: AI-generated video content using Open-Sora v2 (text→video) and Stable Video Diffusion 1.1 (image→video)
-- **Conversational CLI**: Natural-language interface for interactive video editing with prompt clarification
-
-## 🎬 Workflow Demo
-
-![LLM Video Editor Workflow](assets/workflow-demo.gif)
-
-*Complete workflow demonstration: from prompt input to rendered 5-second Instagram Reel with quality validation*
-
-## 🚀 Quick Start
-
-### Installation
-
-1. **Install uv** (Modern Python package manager)
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   # Or: brew install uv
-   ```
-
-2. **Setup Project Environment**
-   ```bash
-   # Clone and setup (automated)
-   ./setup_environment.sh
-   
-   # Or manual setup
-   uv python install 3.11  # Install Python 3.11
-   uv sync                  # Create environment and install dependencies
-   uv add --optional pro    # Install pro polish features (YOLO, Demucs, etc.)
-   ```
-
-3. **Install Ollama** (for local LLM support)
-   ```bash
-   # macOS
-   brew install ollama
-   
-   # Start Ollama service
-   ollama serve
-   
-   # Pull a model (in another terminal)
-   ollama pull llama3.1
-   ```
-
-4. **Install FFmpeg**
-   ```bash
-   # macOS
-   brew install ffmpeg
-   
-   # Ubuntu
-   sudo apt update && sudo apt install ffmpeg
-   
-   # Windows: Download from https://ffmpeg.org/
-   ```
-
-### Basic Usage
-
-**Using the Python API (Recommended):**
-```python
-from llm_video_editor.core.ollama_planner import OllamaVideoPlanner
-from llm_video_editor.core.media_probe import MediaProbe
-from llm_video_editor.core.asr import ASRProcessor
-from llm_video_editor.core.scene_detection import SceneDetector
-from llm_video_editor.core.renderer import VideoRenderer
-
-# Initialize components
-planner = OllamaVideoPlanner(model_name="llama3.1")
-renderer = VideoRenderer(use_gpu=True)
-probe = MediaProbe()
-
-# Process video
-media_info = probe.probe_file("input.mp4")
-edl = planner.generate_edl(
-    prompt="Create a 30s Instagram Reel highlighting the best moments",
-    media_info=media_info,
-    target_platform="reels"
-)
-
-# Render final video
-results = renderer.render_edl(edl, "input.mp4", "output/")
-print(f"Final video: {results['final_video']}")
-```
-
-**Interactive CLI:**
-```bash
-# Start interactive mode (prompts for inputs)
-uv run llm-video-router --interactive
-
-# Or run without arguments for automatic interactive mode
-uv run llm-video-router
-```
-
-**Command Line:**
-```bash
-# With uv (recommended)
-uv run llm-video-router --use-ollama --ollama-model gpt-oss:latest --in ./videos --prompt "60s reel: top 3 takeaways, captions, upbeat" --target reels
-
-# Direct execution (if environment activated)
-llm-video-router --use-ollama --ollama-model llama3.1 --in ./videos --prompt "10min compilation: best moments" --target youtube
-```
-
-## 🤖 Use with Claude Code (long-form YouTube)
-
-Open this repo in Claude Code and type:
-
-```
-/youtube-edit edit ~/Videos/raw-tutorial.mp4 for YouTube, about 15 minutes
-/youtube-shorts make 3 shorts from ~/Videos/raw-tutorial.mp4
-```
-
-Claude transcribes the recording, reads the **whole** transcript, writes the edit (retakes removed,
-cold open, tightened pauses, chapters), renders a preview, checks every cut, and delivers the MP4,
-`.srt` captions and a chapters block for the description. Notes like "the intro is too long" just
-re-render. The tools can also be run directly:
+![LLM Video Editor Workflow](assets/video_editor_workflow.gif)
 
 ```bash
-uv run --no-project --with faster-whisper python -m llm_video_editor.longform ingest raw.mp4 projects/demo
-# write projects/demo/edl.json (see .claude/skills/youtube-edit/reference.md)
-uv run --no-project --with faster-whisper python -m llm_video_editor.longform render projects/demo --preview
+uv run llmve run ./raw_clips/ -p "10 minute YouTube edit: the three key ideas" -t youtube
+# ... look at the review sheet it prints, then:
+uv run llmve review approve .llmve/<batch_hash>
+uv run llmve render .llmve/<batch_hash> -o final.mp4
 ```
 
-## 📋 Requirements
+## How it works
 
-### System Dependencies
-- **uv** (Modern Python package manager - recommended)
-- **Ollama** (for local LLM inference)
-- **FFmpeg** (with VideoToolbox/NVENC support for GPU acceleration)
-- **Python 3.11+**
+Each stage reads the previous stage's JSON checkpoint and writes its own
+under `.llmve/<batch_hash>/`. The batch hash comes from the sorted
+`(path, mtime, size)` of the inputs, so re-runs reuse finished work.
 
-### Python Dependencies (Automatically Installed)
-- **LangGraph** for workflow orchestration
-- **faster-whisper** for speech recognition with local Whisper models
-- **PySceneDetect** for intelligent scene boundary detection  
-- **OpenTimelineIO** for professional video interchange
-- **langchain-community** for Ollama LLM integration
-- **requests** for API communication
+| Stage | Command | Writes | Notes |
+|---|---|---|---|
+| watch | `llmve watch <inputs>` | `transcript.json`, `clips_manifest.json`, `sheets/` | word-level faster-whisper (optionally chunked and parallel for long clips, see below); scene/motion scores; clips with no speech tagged as B-roll; 4x4 contact sheets (0.5 FPS overview, 2 FPS on request via `watch-window`) |
+| plan | `llmve plan <ws> -p ...` | `asset_plan.json`, `edl_raw.json` | map/reduce over the whole transcript; the LLM picks **segment ids**, never timestamps; only text leaves the machine |
+| b-roll-select | `llmve broll index/describe/match` | `broll_select.json` | persistent `broll_index.md` in your B-roll folder, incremental rescans, BM25 + optional LLM re-rank |
+| cut-audit | `llmve cut-audit <ws>` | `cut_audit.json`, `edl_audited.json` | deterministic: word-edge snapping, sentence completion, per-clip clamping, overlaps, duration budget |
+| take-geometry | `llmve geometry <ws>` | `geometry_map.json` | MediaPipe face boxes per used scene; crop centre, caption band and PiP corner that avoid the face |
+| review-gate | `llmve review <ws>` / `review approve` | `review/sheet_*.png`, `review/review.json` | one composited frame per cut/overlay in seconds; render refuses until the current cut is approved |
+| render | `llmve render <ws>` | `render/<platform>.mp4`, `render/qc_report.json` | one encode; every segment normalised to 30 fps, square pixels, cover-crop/letterbox (never stretched), 48 kHz stereo; frame-exact concat; two-pass `loudnorm=I=-14:TP=-1.5:LRA=11`; NVENC/VideoToolbox when they actually work |
 
-### Tested Configurations
-- ✅ **macOS**: Apple Silicon with VideoToolbox GPU acceleration
-- ✅ **Linux**: NVIDIA GPUs with NVENC acceleration
-- ⚠️ **Windows**: CPU-only (GPU acceleration coming soon)
+`llmve transcript <ws>` writes a compact `transcript.md` (segment ids, times,
+`(retake?)` markers, long pauses) for reading or planning by hand.
 
-## 🏗️ Architecture
+`llmve run` chains every stage and stops at the review sheet unless you pass
+`--approve`. `llmve schema <name>` prints the JSON Schema of any checkpoint.
 
-```
-Input Video → Media Probe → ASR + Scene Detection → Ollama LLM Planning → Video Rendering → Platform-Ready Output
-```
+### Multi-clip shoots (e.g. 30 minutes of clips into a 10-minute edit)
+Pass a folder or glob. Mixed cameras (30/60 fps, different resolutions and
+codecs, phone rotation) are normalised per segment before the concat. Clips
+without speech become B-roll candidates the planner can cut away to. Edits
+with more than 24 cuts render in groups to near-lossless intermediate files
+first, so memory stays bounded.
 
-### Workflow Steps
-
-1. **Media Probe**: Extract video metadata, resolution, duration, and codec information
-2. **ASR Processing**: Transcribe audio with word-level timestamps using local Whisper models
-3. **Scene Detection**: Identify shot boundaries and content changes using PySceneDetect
-4. **LLM Planning**: Generate Edit Decision List (EDL) using local Ollama models based on user prompt
-5. **Video Rendering**: Apply cuts, reframing, and effects with GPU-accelerated FFmpeg
-6. **Output Generation**: Create platform-optimized videos with subtitles and metadata
-
-### Key Improvements ✨
-- **100% Local Processing**: No API keys or internet required after initial setup
-- **GPU Acceleration**: Hardware-accelerated video encoding (VideoToolbox/NVENC)
-- **Smart Reframing**: Intelligent 16:9 to 9:16 conversion with content-aware cropping
-- **Production Ready**: Generates actual video files, not just planning documents
-
-## 🎯 Platform Presets
-
-| Platform | Resolution | Aspect Ratio | Max Duration | Typical Duration |
-|----------|-----------|--------------|--------------|------------------|
-| YouTube  | 1920x1080 | 16:9        | 1 hour       | 10 minutes       |
-| Reels    | 1080x1920 | 9:16        | 90s          | 30s              |
-| TikTok   | 1080x1920 | 9:16        | 3 minutes    | 60s              |
-
-## 🎨 Generative B-roll
-
-### Text→Video (Open-Sora v2)
-Set `OPEN_SORA_CMD` to your local infer script, or `OPEN_SORA_HOST` to a running server.
-
-### Image→Video (SVD 1.1)
-Install `diffusers`, `torch`, `accelerate`, accept the model license on Hugging Face.
+### Long recordings (chunked, parallel ASR)
+By default every clip is transcribed in one pass. For long clips, turn on
+chunking:
 
 ```bash
-# Example usage in interactive CLI
-uv run llm-video-router --interactive
-# Follow the prompts to input video file, editing prompt, and target platform
+uv run llmve watch ./raw_clips/ --chunk-asr-over 10 --asr-workers 4
+uv run llmve run ./raw_clips/ -p "..." --chunk-asr-over 10   # same flags on `run`
 ```
 
-## 🔧 CLI Commands
+Clips longer than `--chunk-asr-over` minutes have their 16 kHz audio split
+into chunks of about 5 minutes with 2 s of overlap. Each cut goes in the middle
+of a pause found by ffmpeg `silencedetect` (within ±30 s of the nominal
+boundary), or at the fixed point when there is no pause. Chunks run in a
+process pool with one model per worker. `--asr-workers 0` (the default) means
+1 worker on GPU and up to 4 on CPU.
 
-### Main Processing
+Chunks are merged by timestamp, not by text: each word belongs to the chunk
+whose interior holds its midpoint, and words that both chunks transcribed in
+the overlap are kept once. Segment ids are re-numbered per clip, so
+`transcript.json` looks the same as an unchunked run. Chunk settings (but not
+the worker count) are part of the per-clip ASR cache key; clips below the
+threshold keep their existing cache.
+
+From Python, pass `chunking=ChunkConfig(...)` (`llm_video_editor.stages.chunked_asr`)
+to `watch()`, or set `Deps(asr_chunking=ChunkConfig(...))` for the LangGraph
+graph. `ChunkConfig` also exposes the chunk length, overlap, search window and
+silence threshold.
+
+## Install
+
+Needs Python 3.11+, [uv](https://docs.astral.sh/uv/) and FFmpeg with libass
+and libfreetype (`apt install ffmpeg` or `brew install ffmpeg`).
+
 ```bash
-llm-video-router [OPTIONS]
-
-Options:
-  -i, --input PATH                Input video file or directory
-  -p, --prompt TEXT               Editing prompt describing what you want to create
-  -t, --target [youtube|reels|tiktok]  Target platform for the video
-  --interactive                   Run in interactive mode (prompts for inputs)
-  -o, --output PATH               Output directory for generated files
-  --asr-model [tiny|base|small|medium|large-v3]  Whisper model size for speech recognition
-  --scene-threshold FLOAT         Scene detection threshold (lower = more sensitive)
-  --language TEXT                 Language code for ASR (e.g., en, es, fr). Auto-detect if not specified
-  --planner-model TEXT            LLM model for planning (gpt-4, gpt-3.5-turbo, etc.)
-  --use-ollama                    Use local Ollama instead of OpenAI
-  --ollama-model TEXT             Ollama model name (llama3.2, codellama, mistral, etc.)
-  --ollama-url TEXT               Ollama server URL
-  --dry-run                       Show what would be done without actually processing
-  -v, --verbose                   Enable verbose output
-  --config PATH                   Configuration file path (JSON)
+uv sync --extra dev                       # core pipeline + tests
+uv sync --extra dev --extra vision        # + MediaPipe face detection (Linux: apt install libegl1)
 ```
 
-### Interactive Mode
-```bash
-# Start interactive mode - prompts for all inputs
-uv run llm-video-router --interactive
+| Extra | Adds |
+|---|---|
+| `vision` | MediaPipe face detector for take-geometry |
+| `pro` | YOLO person fallback, music ducking (Demucs) |
+| `gen` | generative B-roll fallback (Open-Sora / Stable Video Diffusion) |
+| `graph` | LangGraph orchestration (`llm_video_editor.graph`) with a review interrupt |
+| `anthropic`, `openai` | API planner providers |
 
-# Or run without any arguments (automatically enters interactive mode)
-uv run llm-video-router
-```
+## Planner providers
 
-## 🐍 Programmatic Usage
+`--provider claude-cli` (the default) runs
+`claude -p --output-format json --json-schema <schema> --tools "" --no-session-persistence`
+in a clean temporary directory, with the prompt on stdin. It needs Claude Code
+installed but no API key. The alternatives are `ollama` (local; `/api/chat`
+with a JSON-schema `format`), `anthropic` and `openai`. Every provider returns
+a validated Pydantic model. Prompts that mention a media file path are
+rejected before they're sent.
 
-```python
-from llm_video_editor.core.workflow import create_workflow
-
-# Create workflow
-workflow = create_workflow(
-    asr_model="large-v3",
-    scene_threshold=27.0,
-    planner_model="gpt-4"
-)
-
-# Process video
-result = workflow.run({
-    "path": "video.mp4",
-    "prompt": "Create a 30s highlights reel with captions",
-    "target": "reels",
-    "output_dir": "output"
-})
-
-print(f"Status: {result['status']}")
-print(f"Generated {result['edl_summary']['clips_count']} clips")
-```
-
-## ⚙️ Configuration
-
-Create a `config.json` file:
+### Long-form YouTube: pacing, punch-ins, chapters
+Optional EDL fields (set them in `edl_raw.json`, or let the `youtube-edit`
+skill do it):
 
 ```json
-{
-  "asr_model": "large-v3",
-  "scene_threshold": 27.0,
-  "planner_model": "gpt-4",
-  "language": "en",
-  "gpu_acceleration": true,
-  "platforms": {
-    "reels": {
-      "max_duration": 60,
-      "quality": "medium"
-    }
-  }
-}
+{"pacing": {"tighten": true, "max_gap": 0.6, "drop_fillers": true, "punch_in": "alternate"},
+ "captions": {"enabled": false, "replacements": {"cloud": "Claude"}},
+ "clips": [{"clip_id": "c001", "chapter": "Intro", "zoom": 1.0, "...": "..."}]}
 ```
 
-## 📁 Output Structure
+- **Jump-cut tightening** runs as the last step of cut-audit: A-roll clips are
+  split into speech islands at pauses longer than `max_gap` (standalone um/uh
+  count as pauses with `drop_fillers`). Splits sit on word edges inside clips
+  that already passed the sentence checks; overlays follow the piece that plays
+  their moment.
+- **Punch-ins**: `zoom` per clip, or `punch_in: alternate` to zoom every second
+  island so jump cuts read as camera changes. Geometry and review use the same
+  zoomed crop.
+- **Chapters**: `chapter` on the clip that starts a topic. Render embeds them in
+  the MP4, writes `<out>.chapters.txt` for the description and warns when
+  YouTube's rules (first at 0:00, at least 3, each 10 s or more) are broken.
+- **Cold opens**: a hook replayed from later in the recording is kept (cut-audit
+  reports it as a warning instead of trimming the later clip).
+- **Captions**: every render also writes `<out>.srt` (fillers removed,
+  `captions.replacements` applied) for upload; `--no-captions` skips burning in.
+- The `youtube` preset allows up to 12 hours; `shorts` is a 9:16 preset (180 s max).
 
-```
-output/
-├── video_name/
-│   ├── edit_decision_list.json    # Main EDL file
-│   ├── captions.srt              # Subtitle file  
-│   ├── scenes.json               # Scene boundaries
-│   ├── validation_report.json    # Quality checks
-│   └── thumbnails/               # Scene thumbnails
-└── processing_results.json       # Batch results
-```
+## Claude Code skills
 
-## 🎨 Example Prompts
+`.claude/skills/` exposes the pipeline to Claude Code: `edit-video` (entry
+point), `watch`, `cut-audit`, `take-geometry`, `b-roll-select`,
+`review-gate`, and two specialised entry points: `youtube-edit` (one long
+recording into a 16:9 YouTube video with cold open, pacing, chapters and SRT)
+and `youtube-shorts` (vertical clips from a long video). Each skill tells Claude which tested `llmve` command to run and
+how to read its checkpoint. `.claude/settings.json` denies reads of raw
+video/audio, so agents work only from JSON checkpoints and contact sheets.
 
-- `"60s reel: top 3 takeaways, captions, upbeat"`
-- `"5min YouTube highlights: best moments, lower thirds"`
-- `"30s product demo: step-by-step, call-to-action"`
-- `"2min tutorial summary: key points, engaging intro"`
-- `"45s testimonial compilation: emotional moments"`
+## Programmatic use
 
-## 🔍 Quality Assurance
+See `examples/pipeline.py` for the stage functions, or use the LangGraph
+graph, which pauses for review:
 
-The system performs automatic validation:
-
-- ✅ Duration constraints per platform
-- ✅ Aspect ratio compatibility  
-- ✅ Scene boundary alignment
-- ✅ Speech coverage analysis
-- ✅ Audio loudness standards (EBU-R128)
-
-## 🧪 Testing
-
-### Quick Test
 ```python
-# Test the complete workflow
-python test_ollama_workflow.py
+from langgraph.types import Command
+from llm_video_editor.graph import build_graph
+
+app = build_graph()
+cfg = {"configurable": {"thread_id": "edit-1"}}
+state = app.invoke({"inputs": ["./raw_clips"], "prompt": "60s reel", "target": "reels"}, cfg)
+print(state["__interrupt__"][0].value["review_sheets"])
+final = app.invoke(Command(resume={"approve": True}), cfg)
+print(final["output"], final["qc_passed"])
 ```
 
-Expected output:
-- ✅ Media probing: Video metadata extraction
-- ✅ Scene detection: Boundary identification
-- ✅ ASR processing: Audio transcription
-- ✅ Ollama LLM: EDL generation
-- ✅ Video rendering: Platform-ready output
+## Development
 
-### Component Tests
-```python
-# Test individual components
-python test_full_rendering.py    # Video rendering pipeline
-python test_concat_fix.py       # Video concatenation
-```
-
-## 🛠️ Development
-
-### Setup Development Environment
 ```bash
-git clone <repository>
-cd llm-video-editor
-
-# Using uv (recommended)
-uv python install 3.11
-uv sync
-uv add --optional pro
-
-# Install Ollama and pull model
-ollama serve &
-ollama pull llama3.1
+uv run ruff check .
+uv run pytest
 ```
-
-### Run Tests
-```bash
-uv run pytest tests/            # Unit tests  
-uv run python test_ollama_workflow.py  # End-to-end test
-```
-
-### Code Quality
-```bash
-black llm_video_editor/
-flake8 llm_video_editor/
-mypy llm_video_editor/
-```
-
-## 📚 Advanced Features
-
-### Custom LLM Models
-```python
-from langchain_openai import ChatOpenAI
-from llm_video_editor.core.planner import VideoPlanner
-
-# Use custom model
-custom_llm = ChatOpenAI(model_name="gpt-3.5-turbo")
-planner = VideoPlanner(llm=custom_llm)
-```
-
-### GPU Acceleration
-```bash
-# Enable NVENC for faster encoding
-llm-video-router -i video.mp4 -p "quick edit" --gpu-accel
-```
-
-### Batch Processing
-```bash
-# Process entire directory
-llm-video-router -i ./videos/ -p "social media cuts" -t reels
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **FFmpeg not found**
-   ```bash
-   # System package manager
-   apt-get install ffmpeg  # Ubuntu
-   brew install ffmpeg     # macOS
-   # Windows: Download from https://ffmpeg.org/
-   ```
-
-2. **CUDA/GPU issues**
-   ```bash
-   # Check NVENC support
-   ffmpeg -encoders | grep nvenc
-   
-   # Fallback to CPU
-   llm-video-router --no-gpu-accel
-   ```
-
-3. **Memory issues with large models**
-   ```bash
-   # Use smaller Whisper model
-   uv run llm-video-router --asr-model medium
-   ```
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📞 Support
-
-- 📖 Documentation: [docs/](docs/)
-- 🐛 Bug Reports: [GitHub Issues](../../issues)
-- 💡 Feature Requests: [GitHub Issues](../../issues)
-- 💬 Discussions: [GitHub Discussions](../../discussions)
-
----
-
-**Built with ❤️ using LangGraph, Whisper, and FFmpeg**
+The integration tests generate synthetic multi-camera media with ffmpeg and
+check A/V sync with flash/beep markers, -14 LUFS output, the review gate and
+the full CLI run. ASR, the LLM and the face detector are replaced by fakes.

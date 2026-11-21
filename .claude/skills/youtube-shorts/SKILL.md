@@ -1,28 +1,38 @@
 ---
 name: youtube-shorts
-description: "Finds the best 20-60 second moments in a long video and renders them as vertical 9:16 YouTube Shorts / Reels with a hook-first cut and captions file. Trigger with /youtube-shorts or 'make shorts from this video', 'clip this podcast', 'find viral moments'."
+description: Find the best 20-60 second moments in a long video and render each as a vertical 9:16 YouTube Short / Reel with a hook-first cut, face-tracked crop and burned-in captions. Trigger with /youtube-shorts or "make shorts from this video", "clip this podcast", "find the best moments". Builds on the edit-video pipeline.
 ---
 
 # /youtube-shorts
 
-Long video in, 3-5 vertical clips out. Uses the same tools as `/youtube-edit`; read
-`.claude/skills/youtube-edit/SKILL.md` (Commands, Hard rules) and `reference.md` first.
+Same stages and gates as `edit-video` (read it first). One workspace holds one
+cut at a time, so shorts are made one after another.
 
-## Workflow
-1. **Ingest** (skip if `projects/<slug>/words.json` exists from a `/youtube-edit` run):
-   `LF ingest "<source>" projects/<slug> --keywords "<names>"`
-2. **Pick moments** from `transcript.md`. A good Short:
-   - works with zero context: the first sentence is the hook (claim, question, result, conflict)
-   - one idea, with a payoff in the last 3 s; 20-45 s is the sweet spot, 60 s max
-   - can start mid-passage: a later punchy line moved to the front is a valid hook
-   Rank candidates and pick the top 3-5 (ask how many if the user cares; default 3).
-3. **One EDL per short**: `projects/<slug>/shorts/<n>-<name>.json`, same schema as `edl.json`, with
-   `"tighten": {"enabled": true, "max_gap": 0.4}` and no chapters. Use `cx` (0-1) per segment to keep
-   the speaker in the 9:16 crop: look at `work/sheet.jpg` to see where they sit in the frame
-   (left third ~0.3, centre 0.5, right third ~0.7). Screen-share segments rarely survive a 9:16 crop:
-   avoid them or say so.
-4. **Render** each:
-   `LF render projects/<slug> --edl projects/<slug>/shorts/<file>.json --vertical --preview`
-   check the `.cuts.jpg` (speaker centred? face never cut off?), then without `--preview`.
-5. **Deliver**: paths, length, the hook line, a title (under 40 characters) per short, and the `.srt`
-   files. Burned-in animated captions are not built in; suggest CapCut/Premiere or say so if asked.
+## 1. Find the moments
+```bash
+uv run llmve watch <recording> --chunk-asr-over 10   # instant if already watched
+uv run llmve transcript <ws>
+```
+From `transcript.md`, rank candidates. A good Short works with zero context,
+opens on its hook (claim, question, result), carries one idea and lands a
+payoff; 20-45 s is the sweet spot. Pick the top 3 unless told otherwise and
+show the list (segment ids, hook line, length).
+
+## 2. For each short
+```bash
+uv run llmve plan <ws> -t shorts --target-duration 40s -p "<this moment: segments N-M, hook first>"
+```
+Check `edl_raw.json` holds that moment (fix it from `transcript.json` times if
+not; a later punchy line moved to the front is a valid hook) and set
+`"pacing": {"tighten": true, "max_gap": 0.4, "drop_fillers": true}` and
+`"captions": {"style": "word_highlight"}`.
+```bash
+uv run llmve cut-audit <ws>
+uv run llmve geometry <ws>        # face-tracked 9:16 crop and caption band
+uv run llmve review <ws>          # stop: show the sheet to the user
+uv run llmve render <ws> -o shorts/<n>-<name>.mp4
+```
+Screen-share segments rarely survive a 9:16 crop: avoid them or say so.
+
+## 3. Deliver
+Per short: path, length, hook line, a title under 40 characters, QC line.
