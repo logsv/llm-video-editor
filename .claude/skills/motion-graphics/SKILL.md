@@ -27,13 +27,16 @@ uv run llmve graphics chapters <ws>        # one title card per clip with a chap
 ```
 - `lower-third`: name/role, `position` bottom-left | top-left | bottom-center
   (in 9:16 it sits above the caption band automatically).
-- `title-card`: full-frame dimmed card with `title`, optional `kicker`, `dim`.
+- `title-card`: full-frame dimmed card with `title`, optional `kicker`, `dim`. Keep it
+  full frame: a `box` crops the dimming and leaves a visible edge; if it covers a face,
+  time it to another shot instead.
 - `callout`: one short phrase that pops in, `position` top | center.
 - `location`: place title with a map pin, `title` (place) + `subtitle` (region,
   road, distance), `position` top-left | bottom-left | top-right | center.
 - `label`: points at something in the shot, `text`, optional `detail`, `x`/`y` (0-1
   of the frame). It does not track movement: use it on a steady shot, 2-3 s.
-- All take `accent` (hex colour). Keep text short: 2-6 words per line.
+- All take `accent` and `text_color` (hex, or `"auto"` to pick from the shot);
+  `location` also `style`: shadow | card. Keep text short: 2-6 words per line.
 Clip ids come from `edl_raw.json`. Time a graphic to the words: offset = word
 start in `transcript.json` minus the clip's `start`.
 
@@ -60,8 +63,9 @@ Viewers of a trip video want to know where they are. Decide with the user's brie
 agent's `review` tool returns them): contrast (3:1 minimum), busy background, size,
 title-safe area (5% in 16:9; in 9:16 also the right 15% and bottom 20%), face and
 caption overlap, the shot's palette and suggested colours. Act on each issue:
-- low contrast or busy background: a template with a card (`lower-third`), the
-  suggested `text`/`contrast` colour, another `position`, or a calmer moment (offset);
+- low contrast: set `text_color` to `suggested.text` (or `"auto"`); bright or busy
+  background: `location` with `style: card`, or `lower-third`; or another `position`
+  or a calmer moment (offset);
 - colours: `"accent": "auto"` takes a colour from the shot (or a contrasting one when
   the match would be faint); or use `suggested.match` for a calm look,
   `suggested.contrast` to stand out. Keep one accent per video unless the brief asks;

@@ -62,8 +62,25 @@ class _Recorder:
         ))
 
 
+DOUBTFUL_PROB = 0.4
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+
+
+def doubtful(w: Word, language: str | None = None) -> bool:
+    """A word ASR probably invented (wind, engine, crowd noise): low confidence, or
+    Chinese/Japanese/Korean characters in a transcript of another language."""
+    if w.prob < DOUBTFUL_PROB:
+        return True
+    return bool(_CJK.search(w.text)) and (language or "")[:2] not in ("zh", "ja", "ko", "yu")
+
+
+def _word_note(w: Word, language: str | None) -> str:
+    return (f" - doubtful word (confidence {w.prob:.2f}): probably noise, not speech"
+            if doubtful(w, language) else "")
+
+
 def _snap(clip: EDLClip, words: list[Word], duration: float, cfg: AuditConfig,
-          rec: _Recorder) -> EDLClip | None:
+          rec: _Recorder, language: str | None = None) -> EDLClip | None:
     s, e = clip.start, clip.end
     if not words:
         return clip
@@ -71,7 +88,8 @@ def _snap(clip: EDLClip, words: list[Word], duration: float, cfg: AuditConfig,
     # -- in point ---------------------------------------------------------------
     inside = next((w for w in words if w.start + 1e-3 < s < w.end - 1e-3), None)
     if inside is not None:
-        rec.add("mid_word_in", clip, f"in point {s:.3f}s cuts the word {inside.text!r}",
+        rec.add("mid_word_in", clip, f"in point {s:.3f}s cuts the word {inside.text!r}"
+                f"{_word_note(inside, language)}",
                 at=s, fixed=True, fix=f"moved to word start {inside.start:.3f}s")
         s = inside.start
     first_i = next((i for i, w in enumerate(words) if w.start >= s - 1e-3), None)
@@ -83,7 +101,8 @@ def _snap(clip: EDLClip, words: list[Word], duration: float, cfg: AuditConfig,
     # -- out point --------------------------------------------------------------
     inside = next((w for w in words if w.start + 1e-3 < e < w.end - 1e-3), None)
     if inside is not None:
-        rec.add("mid_word_out", clip, f"out point {e:.3f}s cuts the word {inside.text!r}",
+        rec.add("mid_word_out", clip, f"out point {e:.3f}s cuts the word {inside.text!r}"
+                f"{_word_note(inside, language)}",
                 at=e, fixed=True, fix=f"moved to word end {inside.end:.3f}s")
         e = inside.end
     last_i = max((i for i, w in enumerate(words) if w.end <= e + 1e-3), default=None)
@@ -149,13 +168,14 @@ def audit(edl: EDL, transcript: Transcript, manifest: ClipsManifest,
             clip = EDLClip(**{**clip.model_dump(), "start": ns, "end": ne})
         ct = transcript.for_clip(clip.source_clip_id)
         words = ct.words() if ct and clip.role == "a_roll" else []
+        lang = ct.language if ct else None
         if cfg.editorial_fixes:
-            snapped = _snap(clip, words, info.duration, cfg, rec)
+            snapped = _snap(clip, words, info.duration, cfg, rec, lang)
             if snapped is not None:
                 clips.append(snapped)
         else:
             scratch = _Recorder()
-            _snap(clip, words, info.duration, cfg, scratch)
+            _snap(clip, words, info.duration, cfg, scratch, lang)
             for v in scratch.items:
                 rec.items.append(_as_suggestion(v))
             clips.append(clip)

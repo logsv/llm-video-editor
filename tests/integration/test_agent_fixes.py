@@ -103,9 +103,7 @@ def test_long_tools_run_as_jobs(project):
     path = jobs._path(Path(ws), "render-dead")
     path.write_text(json.dumps({"job_id": "render-dead", "tool": "render", "args": {},
                                 "status": "running", "created_at": time.time()}))
-    dead = subprocess.Popen([sys.executable, "-c", "pass"])
-    dead.wait()
-    path.with_suffix(".pid").write_text(str(dead.pid))
+    path.with_suffix(".pid").write_text("99999999")  # above any pid_max: never alive
     path.with_suffix(".log").write_text("Traceback ...\nSegmentation fault\n")
     res = call("job_status", {"workspace": ws, "job_id": "render-dead", "wait_seconds": 0}, c)
     assert "exited without a result" in res["error"] and "Segmentation" in res["log_tail"]

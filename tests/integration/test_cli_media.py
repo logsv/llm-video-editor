@@ -42,7 +42,7 @@ def test_media_and_music_commands(tmp_path, monkeypatch):
         assert r.exit_code == 0, r.output
     music = Workspace.read(ws.edl_raw, EDL).music
     assert [(m.track_id, m.role, m.volume_db, m.duck) for m in music] == [
-        ("a001", "music", -18.0, True), ("a002", "sfx", -6.0, False),
+        ("a001", "music", -10.0, True), ("a002", "sfx", -4.0, False),
         ("a003", "voiceover", 0.0, False)]
     assert cli.invoke(app, ["music", "add", root, stored, "--at", "c9"]).exit_code != 0
 

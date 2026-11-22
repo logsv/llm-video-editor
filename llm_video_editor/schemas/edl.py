@@ -74,7 +74,11 @@ class MusicTrack(Strict):
     offset: float = 0.0  # seconds after the anchor clip starts in the output
     duration: float | None = None  # None: to the end of the cut (music) / of the file (sfx)
     src_start: float = 0.0  # where to start inside the file
-    volume_db: float = Field(-18.0, ge=-60, le=12)  # gain before the final loudness pass
+    # level in dB. With mix.music_level "speech" (default) the file is first measured and
+    # levelled to the speech, so this is relative to the voice whatever the file's
+    # mastering: 0 = as loud as the speech. Defaults: music -10, sfx -4, voiceover 0.
+    # With "file" it is a plain gain on the file.
+    volume_db: float = Field(-10.0, ge=-60, le=12)
     duck: bool = True  # dip under speech (sidechain on the voice)
     loop: bool = False  # repeat a short bed to fill `duration`
     fade_in: float = Field(1.0, ge=0)
@@ -82,9 +86,12 @@ class MusicTrack(Strict):
 
     @model_validator(mode="after")
     def _voiceover_defaults(self):
-        """A voice-over is speech: full level, no fades and never ducked, unless set."""
+        """A voice-over is speech: full level, no fades and never ducked, unless set.
+        A sound effect defaults to just under the speech."""
+        set_ = self.model_fields_set
+        if self.role == "sfx" and "volume_db" not in set_:
+            object.__setattr__(self, "volume_db", -4.0)
         if self.role == "voiceover":
-            set_ = self.model_fields_set
             object.__setattr__(self, "duck", False)
             if "volume_db" not in set_:
                 object.__setattr__(self, "volume_db", 0.0)
@@ -98,6 +105,10 @@ class MixSettings(Strict):
     """How music ducks under speech (the clips' own voice plus voice-over tracks)."""
 
     duck_depth_db: float = Field(12.0, ge=0, le=40)  # how far music dips while someone speaks
+    # "speech": every music/sfx/voice-over file is measured and levelled to the measured
+    # speech loudness before its volume_db (consistent whatever the file's mastering);
+    # "file": volume_db is a plain gain on the file as it is
+    music_level: Literal["speech", "file"] = "speech"
     attack_ms: float = Field(20.0, gt=0, le=2000)  # how fast it dips
     release_ms: float = Field(450.0, gt=0, le=5000)  # how fast it comes back
 

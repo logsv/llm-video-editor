@@ -253,12 +253,18 @@ check and report, and the agent decides.
   - `plan` fills targets that speech can't reach with shots from clips without speech, in recording order;
   - YouTube 2-50 min cuts work when the footage covers them.
 
+- **Second Mac run fixes:**
+  - images in MCP replies shrunk (JPEG, 1568 px) and capped per reply;
+  - `text_color` on every template, and `style: card` on `location`;
+  - music, SFX and voice-over levelled to the measured speech;
+  - words ASR invented (low confidence, wrong script) flagged as doubtful in `transcript`, `speech_map` and audit.
+
 ### 11.1 Next: problems seen in the Bhopal -> Khajuraho run
 | Item | Why | Notes |
 |---|---|---|
 | Transitions | Only hard cuts exist; the trip edit asks for crossfades between places | Per-cut `transition` on the EDL: cut, crossfade, dip to black/white, whip/slide (duration set by the agent); J-cut and L-cut (audio leads or trails the picture). Render with `xfade`/`acrossfade`; review tiles show mid-transition frames; audit reports transitions longer than either clip |
 | Flip / rotate clips | Helmet camera mounted upside down, no rotation tag | `set_clip` fields `rotate` (90/180/270) and `flip` (h/v), applied in the fit filter, review and geometry |
-| Whisper hallucinations on wind and engine noise | Invented speech in silent riding clips | Voice-activity speech map (Silero VAD or similar); `transcript` and `speech_map` mark words outside voice activity as doubtful; `analyze` option to drop them |
+| Whisper hallucinations on wind and engine noise | Invented speech in silent riding clips ("鱼", "I'm" over wind) | Partly done: low-confidence and wrong-script words are flagged doubtful. Still to do: voice-activity speech map (Silero VAD or similar) marking words outside voice activity; `analyze` option to drop them |
 | Copyrighted audio in the footage | Sound & Light show narration, temple loudspeakers, radio | Music/speech classification of clip audio; flagged in audit and publish; the agent mutes, ducks or replaces |
 | Shot inventory and balance report | The 7-minute brief asks for balanced road / animal / river / people / temple shares | `inventory` tool: categories per clip from objects, places, speech and the agent's own labels (stored); `balance` report on the current edit (seconds and share per category, longest run of one category). The agent sets the target shares |
 | Place titles in `auto` mode | `auto` adds no place titles by itself | With `location_lookup` on, one `location` title per new stop (`--place-titles`), passed through the text safety check |

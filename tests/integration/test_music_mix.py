@@ -128,7 +128,7 @@ def test_sound_effect_plays_once_at_its_offset(ws_info, tmp_path):
                  quality="draft", burn_captions=False)
     assert res.qc.passed, res.qc.problems
     assert band_db(res.output, 220, start=2.1, dur=0.3) - band_db(res.output, 220, start=0.5,
-                                                                  dur=1.0) > 20
+                                                                  dur=1.0) > 12
 
 
 def test_cut_audit_drops_bad_tracks_and_clamps(ws_info, tmp_path):
@@ -144,3 +144,36 @@ def test_cut_audit_drops_bad_tracks_and_clamps(ws_info, tmp_path):
     assert edl.music[0].duration == pytest.approx(edl.total_duration, abs=1e-3)
     kinds = sorted(v.kind for v in rep.violations)
     assert "unknown_music" in kinds and kinds.count("music_out_of_bounds") == 2
+
+
+def test_tracks_are_levelled_to_the_speech_whatever_their_mastering(ws_info, tmp_path):
+    """A loud master and a quiet master of the same bed end up at the same level."""
+    ws, info = ws_info
+    loud = tone(tmp_path / "loud.wav", 220, 10)
+    quiet = tmp_path / "quiet.wav"
+    ffmpeg("-i", str(loud), "-af", "volume=-20dB", str(quiet), timeout=60)
+    levels = {}
+    for name, bed in (("loud", loud), ("quiet", quiet)):
+        res = render(ws, _edl(info, [M(bed, duck=False, fade_in=0, fade_out=0)]),
+                     quality="draft", burn_captions=False)
+        levels[name] = gap(res.output)
+    assert abs(levels["loud"] - levels["quiet"]) < 1.5, levels
+    # with "file" levels the quiet master stays ~20 dB quieter
+    raw = {}
+    for name, bed in (("loud", loud), ("quiet", quiet)):
+        edl = _edl(info, [M(bed, duck=False, fade_in=0, fade_out=0)])
+        edl = edl.model_copy(update={"mix": edl.mix.model_copy(update={"music_level": "file"})})
+        raw[name] = gap(render(ws, edl, quality="draft", burn_captions=False).output)
+    assert raw["quiet"] - raw["loud"] > 10, raw
+
+
+def test_a_loud_mix_stays_under_the_true_peak_limit(ws_info, tmp_path):
+    """Seen on a real trip edit: music pushed the true peak to -0.6 dBTP (limit -1.5)."""
+    ws, info = ws_info
+    noise = tmp_path / "loud.wav"
+    ffmpeg("-f", "lavfi", "-i", "anoisesrc=d=10:c=pink:a=0.9", "-ac", "2", str(noise),
+           timeout=60)
+    res = render(ws, _edl(info, [M(noise, volume_db=12, duck=False, fade_in=0, fade_out=0)]),
+                 quality="draft", burn_captions=False)
+    assert res.qc.true_peak is not None and res.qc.true_peak <= -1.0, res.qc
+    assert res.qc.passed, res.qc.problems

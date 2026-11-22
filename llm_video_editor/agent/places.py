@@ -134,6 +134,10 @@ def name_stops(stops: list[dict], cache_path: Path, *, max_lookups: int = MAX_LO
 
 
 OVERPASS = "https://overpass-api.de/api/interpreter"
+# public mirrors, tried in turn when one is busy or times out
+OVERPASS_MIRRORS = (OVERPASS, "https://overpass.kumi.systems/api/interpreter",
+                    "https://maps.mail.ru/osm/tools/overpass/api/interpreter")
+GIVE_UP_AFTER = 2  # consecutive stops failing on every mirror: stop asking, report it
 
 
 def _overpass_query(lat: float, lon: float, radius_m: int, road_m: int) -> str:
@@ -191,11 +195,18 @@ def parse_nearby(data: dict, here: tuple[float, float], limit: int = 15) -> list
     return sorted(out.values(), key=lambda x: (not x.get("well_known"), x["km"]))[:limit]
 
 
-def _overpass(lat: float, lon: float, radius_m: int, road_m: int, timeout: float = 40) -> dict:
-    r = requests.post(OVERPASS, data={"data": _overpass_query(lat, lon, radius_m, road_m)},
-                      timeout=timeout, headers={"User-Agent": USER_AGENT})
-    r.raise_for_status()
-    return r.json()
+def _overpass(lat: float, lon: float, radius_m: int, road_m: int, timeout: float = 30) -> dict:
+    """The query on each mirror in turn; raises the last error if all fail."""
+    last: Exception | None = None
+    for url in OVERPASS_MIRRORS:
+        try:
+            r = requests.post(url, data={"data": _overpass_query(lat, lon, radius_m, road_m)},
+                              timeout=timeout, headers={"User-Agent": USER_AGENT})
+            r.raise_for_status()
+            return r.json()
+        except (requests.RequestException, ValueError) as e:
+            last = e
+    raise last or requests.RequestException("no Overpass mirror answered")
 
 
 def nearby_stops(stops: list[dict], cache_path: Path, *, radius_km: float = 2.0,
@@ -205,20 +216,26 @@ def nearby_stops(stops: list[dict], cache_path: Path, *, radius_km: float = 2.0,
     fetch, sleep = fetch or _overpass, sleep or time.sleep
     cache: dict[str, list] = json.loads(cache_path.read_text()) if cache_path.exists() else {}
     errors: list[str] = []
-    looked = 0
+    looked = failed_in_a_row = 0
     radius_m, road_m = int(radius_km * 1000), 300
     for s in stops:
         key = f"{s['key']}@{radius_m}"
         hit = cache.get(key)
-        if hit is None and looked < max_lookups:
+        if hit is None and looked < max_lookups and failed_in_a_row < GIVE_UP_AFTER:
             try:
                 if looked:
                     sleep(1.0)
                 hit = parse_nearby(fetch(s["lat"], s["lon"], radius_m, road_m),
                                    (s["lat"], s["lon"]))
                 cache[key] = hit
+                failed_in_a_row = 0
             except (requests.RequestException, ValueError) as e:
                 errors.append(f"stop {s['stop']} nearby: {type(e).__name__}: {str(e)[:120]}")
+                failed_in_a_row += 1
+                if failed_in_a_row == GIVE_UP_AFTER:
+                    errors.append("Overpass did not answer for 2 stops in a row (all "
+                                  "mirrors): skipped the rest; try again later, or use "
+                                  "a smaller nearby_km")
             looked += 1
         if hit is not None:
             s["nearby"] = hit

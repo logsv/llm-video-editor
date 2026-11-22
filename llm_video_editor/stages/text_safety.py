@@ -12,9 +12,11 @@ For each motion graphic, at the moment the review tile shows it, this measures:
 * **palette**: the shot's main colours, and suggested colours - an accent that
   matches the shot, one that contrasts with it, and the text colour that reads best.
 
-It reports; it never changes a graphic. ``accent: "auto"`` on a graphic asks the
-graphics stage to use ``auto_accent`` (the matching colour, or the contrasting one if
-the match would be too faint against the shot).
+It reports; it never changes a graphic. Every built-in template takes ``accent`` and
+``text_color`` (``location`` also ``style: card``), so a finding can be fixed with the
+suggested colours: ``suggested.text`` -> ``text_color``, ``suggested.match`` or
+``suggested.contrast`` -> ``accent``. ``"auto"`` for either asks the graphics stage to
+pick it from the shot (``auto_accent`` / ``suggest``).
 """
 
 from __future__ import annotations
@@ -158,11 +160,12 @@ def measure(edl: EDL, bg: np.ndarray, gfx: np.ndarray, *, graphic_id: str, t_out
         c = max(contrast(lo, back), contrast(hi, back))
     issues = []
     if c < MIN_CONTRAST:
-        issues.append(f"low contrast {c}:1 (needs {MIN_CONTRAST}:1): use the suggested text "
-                      "colour, a card, or a darker/lighter part of the frame")
+        issues.append(f"low contrast {c}:1 (needs {MIN_CONTRAST}:1): set text_color to "
+                      f"{sug['text']} (or \"auto\"), use a card (location style \"card\"), "
+                      "or move it to a darker/lighter part of the frame")
     if not panel and busy > BUSY:
-        issues.append(f"busy background behind the text ({busy:.2f}): a card or shadow, "
-                      "or a calmer part of the frame, reads better")
+        issues.append(f"busy background behind the text ({busy:.2f}): a card (location "
+                      "style \"card\", lower-third) or a calmer part of the frame reads better")
     if y2 - y1 < MIN_HEIGHT:
         issues.append(f"very small: {(y2 - y1):.1%} of the frame height")
     safe = SAFE_PORTRAIT if edl.height > edl.width else SAFE_LANDSCAPE

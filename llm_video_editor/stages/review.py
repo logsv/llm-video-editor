@@ -131,7 +131,7 @@ def build_review(ws: Workspace, edl: EDL | None = None, *, cols: int = 6, rows: 
         mid = seg.duration / 2
         p = placements.get(clip.clip_id)
         box = p.subject_box_out if p else None
-        if p and p.caption_overlap > 0:
+        if p and p.caption_overlap > 0 and edl.captions.enabled:
             warnings.append(f"{clip.clip_id}: caption band still overlaps the subject "
                             f"({p.caption_overlap:.0%})")
         jobs.append((clip, seg.source_file, seg.start + mid, t0 + mid, box, None))

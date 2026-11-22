@@ -61,17 +61,20 @@ def chapter_cards(ws: Workspace, *, template: str = "title-card", duration: floa
     return cards
 
 
-def _auto_accent(edl: EDL, g) -> str:
-    """Accent for ``accent: "auto"``: matches the anchor shot, or contrasts with it."""
+def _auto_colours(edl: EDL, g) -> tuple[str, str]:
+    """``"auto"`` accent and text colour for a graphic, from the anchor shot: an accent
+    that matches it (or contrasts when the match is faint) and the text colour that
+    reads best on it."""
     from ..ffmpeg.runner import FFmpegError
-    from .text_safety import auto_accent, frame_rgb
+    from .text_safety import auto_accent, frame_rgb, suggest
 
     clip = next(c for c in edl.clips if c.clip_id == g.anchor_clip_id)
     t = clip.start + min(max(0.0, g.offset) + 0.5, max(0.0, clip.duration - 0.1))
     try:
-        return auto_accent(frame_rgb(edl, clip.source_file, t, clip.crop_center, clip.zoom))
+        rgb = frame_rgb(edl, clip.source_file, t, clip.crop_center, clip.zoom)
     except (ValueError, FFmpegError):
-        return "#FFC93C"  # the templates' default yellow
+        return "#FFC93C", "#FFFFFF"  # the templates' defaults
+    return auto_accent(rgb), suggest(rgb)["text"]
 
 
 def graphic_specs(ws: Workspace, edl: EDL, starts: list[float], *, quality: str = "standard"
@@ -95,8 +98,12 @@ def graphic_specs(ws: Workspace, edl: EDL, starts: list[float], *, quality: str 
             w = max(2, round(g.box[2] * edl.width) // 2 * 2)
             h = max(2, round(g.box[3] * edl.height) // 2 * 2)
         variables = dict(g.variables)
-        if variables.get("accent") == "auto":  # a colour taken from the shot it sits on
-            variables["accent"] = _auto_accent(edl, g)
+        if "auto" in (variables.get("accent"), variables.get("text_color")):
+            accent, text = _auto_colours(edl, g)  # colours taken from the shot it sits on
+            if variables.get("accent") == "auto":
+                variables["accent"] = accent
+            if variables.get("text_color") == "auto":
+                variables["text_color"] = text
         path = render_graphic(out_dir, template=g.template, composition=g.composition,
                               variables=variables, width=w, height=h, duration=dur,
                               fps=edl.fps, quality=quality)

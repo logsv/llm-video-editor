@@ -23,6 +23,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..schemas import EDL, ClipsManifest, Transcript
+from ..stages.cut_audit import doubtful
 from ..workspace import Workspace, check_output_path
 from . import jobs, ops
 from .edits import EditConflict, EditError, EditStore
@@ -214,7 +215,8 @@ class TranscriptP(WsP):
 
 @tool("transcript", "look", TranscriptP)
 def transcript(ctx: Context, p: TranscriptP) -> dict:
-    """Transcript segments (ids, source times, text, retake and low-confidence hints)."""
+    """Transcript segments (ids, source times, text, retake and low-confidence hints).
+    doubtful_words counts words ASR probably invented over noise (wind, engine)."""
     from ..stages.plan import retake_ids
 
     ws = _ws(p.workspace)
@@ -229,7 +231,8 @@ def transcript(ctx: Context, p: TranscriptP) -> dict:
                 continue
             lines.append({"clip_id": ct.clip_id, "id": s.id, "start": s.start, "end": s.end,
                           "text": s.text, "retake": s.id in retakes,
-                          "unclear_words": sum(w.prob < 0.5 for w in s.words)})
+                          "unclear_words": sum(w.prob < 0.5 for w in s.words),
+                          "doubtful_words": sum(doubtful(w, ct.language) for w in s.words)})
     return {"segments": lines[:p.max_lines], "truncated": len(lines) > p.max_lines,
             "language": {c.clip_id: c.language for c in tr.clips}}
 
@@ -259,7 +262,8 @@ def speech_map(ctx: Context, p: SpeechMapP) -> dict:
     if end - prev >= p.min_pause:
         pauses.append({"start": round(prev, 3), "end": round(end, 3),
                        "seconds": round(end - prev, 3)})
-    return {"words": [{"start": w.start, "end": w.end, "text": w.text, "prob": w.prob}
+    return {"words": [{"start": w.start, "end": w.end, "text": w.text, "prob": w.prob,
+                       **({"doubtful": True} if doubtful(w, ct.language) else {})}
                       for w in words][:3000],
             "pauses": pauses}
 
@@ -851,7 +855,8 @@ class PublishP(WsP):
     category: str
     pinned_comment: str = ""
     thumbnails: list[dict[str, Any]] = Field(
-        default_factory=list, description="up to 3: {clip_id, segment_id, text, style "
+        default_factory=list, description="up to 3: {clip_id, segment_id or at (source "
+        "seconds in the clip, for footage without speech), text, style "
         "(bold|question|reveal), why}")
     video: str | None = None
     geocode: bool = False

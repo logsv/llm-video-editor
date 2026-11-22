@@ -264,11 +264,11 @@ uv run llmve cut-audit .llmve/<batch_hash>       # then geometry, review, render
 
 | Template | Variables | Notes |
 |---|---|---|
-| `lower-third` | `title`, `subtitle`, `accent`, `position` (bottom-left, top-left, bottom-center) | in 9:16 it moves above the caption band |
-| `title-card` | `title`, `kicker`, `accent`, `dim` (0-1) | full-frame card over a dimmed shot; `graphics chapters` fills `title` and "Chapter N" |
-| `callout` | `text`, `accent`, `position` (top, center) | one short phrase that pops in |
-| `location` | `title`, `subtitle`, `accent`, `position` (top-left, bottom-left, top-right, center) | place title with a map pin: town, temple, road ("Khajuraho", "Madhya Pradesh · 380 km") |
-| `label` | `text`, `detail`, `x`, `y` (0-1), `accent` | points at something in the shot (a cow, the temple, the highway); stays put, so use it on a steady shot |
+| `lower-third` | `title`, `subtitle`, `accent`, `text_color`, `position` (bottom-left, top-left, bottom-center) | in 9:16 it moves above the caption band |
+| `title-card` | `title`, `kicker`, `accent`, `text_color`, `dim` (0-1) | full-frame card over a dimmed shot; `graphics chapters` fills `title` and "Chapter N" |
+| `callout` | `text`, `accent`, `text_color`, `position` (top, center) | one short phrase that pops in |
+| `location` | `title`, `subtitle`, `accent`, `text_color`, `position` (top-left, bottom-left, top-right, center), `style` (shadow, card) | place title with a map pin: town, temple, road ("Khajuraho", "Madhya Pradesh · 380 km") |
+| `label` | `text`, `detail`, `x`, `y` (0-1), `accent`, `text_color` | points at something in the shot (a cow, the temple, the highway); stays put, so use it on a steady shot |
 
 - Graphics are `EDL.graphics` entries anchored to a clip (like B-roll overlays):
   `--at` is a clip id from `edl_raw.json`, `--offset` is seconds into that clip,
@@ -397,7 +397,8 @@ uv run llmve tool open_project '{"inputs": ["~/Videos/trip"], "first": 15}'
   title-safe area (bigger in 9:16, where Shorts buttons and titles sit), and overlap with
   the face or the caption band. Each check also gives the shot's palette and suggested
   colours (an accent that matches the shot, one that contrasts, the text colour that
-  reads). `"accent": "auto"` in a graphic's variables picks the colour from its shot.
+  reads). Every template takes `accent` and `text_color` (the location title also
+  `style: card` for busy or bright shots); `"auto"` for either picks it from the shot.
 - Renders must go outside the footage folder (`~/Videos/trip - edit/trip.mp4`, not
   `~/Videos/trip/edit/trip.mp4`), so a later scan of the folder never picks them up.
   Folder scans also skip `.llmve` workspaces and earlier renders (`<video>.llmve.json`).
@@ -535,13 +536,14 @@ The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
 | `render` stops (exit 2): "No review sheet", "The cut changed since it was reviewed" or "Review status is 'rejected'" | run `llmve review <ws>` and `llmve review approve <ws>`; any edit to the cut needs a fresh review |
 | Chapters don't show on YouTube | read the chapter warnings in `qc_report.json`: first at 0:00, at least 3, each 10 s or more |
 | `media search` says a provider needs a key | set `PIXABAY_API_KEY` / `PEXELS_API_KEY` (free accounts); Openverse and Wikimedia need none |
+| Music too loud or too quiet | every track is measured and levelled to your speech, so `volume_db` is relative to the voice (music -10, sfx -4, voice-over 0 by default) whatever the file's mastering; raise or lower it in steps of 2-3 dB. `"mix": {"music_level": "file"}` brings back plain gains |
 | Music barely dips, or dips all the time | it follows speech automatically; set `"mix": {"duck_depth_db": 8-18}` in `edl_raw.json` to change the depth |
 | `publish` warns "no licence/credit recorded" | register the file with `llmve media add` (or remove it from the cut) before uploading |
 | The video is much shorter than the target | most footage has no speech; see [Limitations](#limitations). Narrate over silent clips (`llmve music add ... --role voiceover`) or keep it shorter |
 | Claude (cloud session) cannot find my video folder | run on the computer that has the files (see [Run it where your footage is](#run-it-where-your-footage-is-macos-example)) or share the folder through Remote Control |
 | First run is slow before anything happens | the speech model downloads once (about 1.5 GB); long recordings are transcribed in parallel chunks |
 | `llmve` fails with `ModuleNotFoundError: No module named 'llm_video_editor'` (macOS) | macOS marked uv's editable-install `.pth` file hidden, and Python 3.12+ skips hidden `.pth` files. Run `chflags -R nohidden .venv`, or use `uv run python -m llm_video_editor ...` (what `.mcp.json` does) |
-| Claude's MCP call to `review` / `render` ends with "Connection closed" | update to a version with background jobs (`job_status`); the work continues in its own process. Check `<ws>/jobs/*.log`; meanwhile `uv run llmve tool review '{"workspace": "..."}'` runs it from the terminal |
+| Claude's MCP call to `review` / `render` ends with "Connection closed" | long tools run as background jobs (`job_status`) and images in a reply are shrunk and capped (oversized replies closed the connection). If it still happens, restart Claude Code (`/mcp` reconnects) and check `<ws>/jobs/*.log`; meanwhile `uv run python -m llm_video_editor tool review '{"workspace": "..."}'` runs the same tool from the terminal |
 | `render` refuses: "inside the footage folder" | save the video beside the footage folder, not inside it (scans of that folder would pick it up as a clip) |
 | A tool says "is not a workspace" or ffmpeg cannot find files with a relative path | workspace paths are now made absolute; pass the path `open_project` returned |
 | Non-English speech transcribed badly | `--asr-model large-v3-turbo --language <code>` (the default model is English-only) |

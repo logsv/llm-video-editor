@@ -113,7 +113,7 @@ def test_silent_footage_fills_a_long_youtube_cut_in_recording_order():
     assert 1450 <= total <= 1510
     fills = [s for s in out.segments if s.purpose == "footage"]
     assert all(s.priority == FILL_PRIORITY for s in fills)
-    assert all(0.25 <= s.start and s.end <= 900 - 0.25 for s in fills)
+    assert all(s.start >= 0.25 and s.end <= 900 - 0.25 for s in fills)
     edl = build_edl(out, m)
     assert {c.role for c in edl.clips if c.notes == "footage"} == {"broll"}
     assert "filled" in out.notes

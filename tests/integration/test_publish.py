@@ -154,3 +154,20 @@ def test_real_hyperframes_thumbnails(rendered):
     ws, video = rendered
     pkg = pub.publish(ws, FakeProvider(copy), video=video)
     assert [t.renderer for t in pkg.thumbnails] == ["hyperframes"] * 3
+
+
+def test_thumbnails_by_time_for_footage_without_speech(rendered):
+    ws, video = rendered
+    cut = {c.clip_id: c for c in Workspace.read(ws.edl_audited, EDL).clips}
+    mid1 = round((cut["c001"].start + cut["c001"].end) / 2, 2)
+    mid3 = round((cut["c003"].start + cut["c003"].end) / 2, 2)
+    copy_ = pub.UploadCopy.model_validate({
+        "titles": ["A ride"], "hook": "h", "body": "b", "tags": ["t"], "hashtags": ["x"],
+        "category": "Travel & Events", "pinned_comment": "", "thumbnails": [
+            {"clip_id": "c001", "at": mid1, "text": "The road", "style": "bold", "why": "w"},
+            {"clip_id": "c003", "at": mid3, "text": "Temple", "style": "reveal", "why": "w"},
+            {"clip_id": "c004", "at": 2.0, "text": "nope", "style": "question", "why": "w"}]})
+    pkg = pub.publish(ws, None, video=video, copy=copy_, prefer_hyperframes=False)
+    assert [t.text for t in pkg.thumbnails] == ["The road", "Temple"], pkg.warnings
+    assert pkg.thumbnails[0].t_out == pytest.approx(mid1 - 0.5 - cut["c001"].start, abs=0.6)
+    assert any("c004@2.0s is outside the clip" in w for w in pkg.warnings)

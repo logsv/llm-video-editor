@@ -9,6 +9,7 @@ happen in the final pass.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from concurrent.futures import ThreadPoolExecutor
@@ -143,6 +144,63 @@ def measure_speech(segs: list[Segment], edl: EDL, work: Path, tracks: list[Music
     return Ducking(m.duck_depth_db, m.attack_ms, m.release_ms, key_gain_db=round(gain, 2)), mezz
 
 
+PEAK_MARGIN_DB = 1.0  # headroom below the true-peak target for resampling and AAC overshoot
+
+
+def peak_limiter(target: LoudnessTarget) -> str:
+    """A brick-wall limiter after loudnorm: loudnorm works at 192 kHz and AAC encoding
+    adds inter-sample overshoot, so without it a mix with music can land above the
+    true-peak target (seen: -0.6 dBTP against -1.5)."""
+    lin = 10 ** ((target.true_peak - PEAK_MARGIN_DB) / 20)
+    return f"alimiter=limit={lin:.4f}:attack=1:release=60:level=0"
+
+
+NO_SPEECH_REF = -23.0  # LUFS the tracks are levelled to when the clips have no speech
+
+
+def file_loudness(path: str, cache: Path) -> float | None:
+    """Integrated loudness of an audio file (cached by path, size and mtime)."""
+    st = Path(path).stat()
+    key = f"{path}|{st.st_size}|{st.st_mtime_ns}"
+    data = json.loads(cache.read_text()) if cache.exists() else {}
+    if key not in data:
+        val = measure_file(path).get("input_i")
+        data[key] = val if val is not None and math.isfinite(val) and val > -70 else None
+        cache.write_text(json.dumps(data, indent=1))
+    return data[key]
+
+
+def level_to_speech(segs: list[Segment], edl: EDL, work: Path, tracks: list[MusicSpec],
+                    total: float, max_inputs: int, workers: int, target: LoudnessTarget,
+                    mezz: list[Path] | None
+                    ) -> tuple[list[MusicSpec], Ducking, list[Path] | None]:
+    """Level every track to the measured loudness of the clips' own audio, so a track's
+    volume_db is relative to the voice whatever the file's mastering; the sidechain key
+    comes from the same measurement (voice-overs are levelled to it too)."""
+    m = edl.mix
+    g, _, a, mezz = _base_graph(segs, edl, work, max_inputs, workers, audio_only=True,
+                                mezz=mezz)
+    g.filters.append(f"[{a}]{measure_filter(target)}[meas]")
+    proc = ffmpeg(*g.input_args, "-filter_complex", g.filter_complex, "-map", "[meas]",
+                  "-f", "null", "-", timeout=None)
+    voice = parse_loudnorm_json(proc.stderr).get("input_i")
+    has_voice = voice is not None and math.isfinite(voice) and voice > -70
+    ref = voice if has_voice else NO_SPEECH_REF
+    cache = work / "track_loudness.json"
+    levelled = []
+    for t in tracks:
+        lufs = file_loudness(t.path, cache)  # None: too short or silent -> plain gain
+        gain = t.gain_db + (ref - lufs if lufs is not None else 0.0)
+        levelled.append(dataclasses.replace(t, gain_db=round(max(-60.0, min(40.0, gain)), 2)))
+    if not any(t.duck for t in levelled):
+        return levelled, Ducking(m.duck_depth_db, m.attack_ms, m.release_ms), mezz
+    # the speech bus: the clips' voice at ``ref`` plus voice-overs at ref + their volume_db
+    offsets = ([0.0] if has_voice else []) + [t.gain_db for t in tracks if t.role == "voiceover"]
+    key = max(-30.0, min(50.0, KEY_LEVEL_DB - (ref + max(offsets)))) if offsets else -60.0
+    return levelled, Ducking(m.duck_depth_db, m.attack_ms, m.release_ms,
+                             key_gain_db=round(key, 2)), mezz
+
+
 def _render_mezzanine(i: int, segs: list[Segment], edl: EDL, out_dir: Path) -> Path:
     g = Graph()
     v, a = add_segments(g, segs, width=edl.width, height=edl.height, fps=edl.fps,
@@ -205,8 +263,12 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
     gfx = graphic_specs(ws, edl, starts, quality="draft" if quality == "draft" else "high")
 
     tracks = music_specs(edl, starts, expected)
-    ducking, mezz = measure_speech(segs, edl, work, tracks, expected, max_inputs, workers,
-                                   target, None)
+    if tracks and edl.mix.music_level == "speech":
+        tracks, ducking, mezz = level_to_speech(segs, edl, work, tracks, expected, max_inputs,
+                                                workers, target, None)
+    else:
+        ducking, mezz = measure_speech(segs, edl, work, tracks, expected, max_inputs, workers,
+                                       target, None)
 
     # Pass 1: measure loudness of the programme audio (with music, if any).
     g, _, a, mezz = _base_graph(segs, edl, work, max_inputs, workers, audio_only=True,
@@ -241,7 +303,7 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
         idx = g.add_input("-f", "ffmetadata", "-i", str(meta.resolve()))
         chapter_args = ["-map_chapters", str(idx)]
     g.filters.append(f"{_label(a)}{apply_filter(measured, target)},aresample=48000,"
-                     f"atrim=duration={expected:.6f}[aout]")
+                     f"{peak_limiter(target)},atrim=duration={expected:.6f}[aout]")
     ffmpeg(*g.input_args, "-filter_complex", g.filter_complex, "-map", "[vout]", "-map", "[aout]",
            *chapter_args, *video_args(enc, edl.fps, quality), *AUDIO_ARGS,
            "-movflags", "+faststart",

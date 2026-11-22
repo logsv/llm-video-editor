@@ -523,7 +523,7 @@ def music_add_cmd(
     role: str = typer.Option("music", help="music | sfx | voiceover"),
     offset: float = typer.Option(0.0, help="Seconds after the clip starts"),
     duration: float | None = typer.Option(None, help="Seconds (default: to the end / whole file)"),
-    volume: float | None = typer.Option(None, help="dB before the loudness pass (music -18, voice-over 0)"),
+    volume: float | None = typer.Option(None, help="dB relative to the speech (music -10, sfx -4, voice-over 0)"),
     duck: bool = typer.Option(True, help="Music dips under speech (sfx and voice-over never do)"),
     loop: bool = typer.Option(False, help="Repeat a short bed to fill the duration"),
     src_start: float = typer.Option(0.0, help="Start this far into the file"),
@@ -541,9 +541,7 @@ def music_add_cmd(
     n = len(used) + 1
     while f"a{n:03d}" in used:
         n += 1
-    kw = {"volume_db": volume} if volume is not None else {}
-    if role == "sfx" and volume is None:
-        kw["volume_db"] = -6.0
+    kw = {"volume_db": volume} if volume is not None else {}  # else the role's default
     track = MusicTrack(track_id=f"a{n:03d}", file=str(file.resolve()), role=role,
                        anchor_clip_id=at, offset=offset, duration=duration, src_start=src_start,
                        duck=duck and role == "music",

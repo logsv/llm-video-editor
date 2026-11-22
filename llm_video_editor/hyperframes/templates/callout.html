@@ -1,6 +1,7 @@
 <!doctype html>
 <!-- llmve built-in template: one keyword or short phrase that pops in. -->
 <html lang="en" data-composition-variables='[
+  {"id":"text_color","type":"color","label":"Text colour","default":"#0B0C10"},
   {"id":"text","type":"string","label":"Text","default":"Key idea"},
   {"id":"accent","type":"color","label":"Accent","default":"#FFC93C"},
   {"id":"position","type":"string","label":"top | center","default":"top"}
@@ -15,7 +16,7 @@
   #wrap { position: absolute; left: 50%; top: 12%; transform: translateX(-50%); max-width: 86%; }
   .center #wrap { top: 50%; transform: translate(-50%, -50%); }
   #pill { padding: calc(var(--u) * 1.4) calc(var(--u) * 3.2);
-          border-radius: calc(var(--u) * 6); background: #fff; color: #0b0c10;
+          border-radius: calc(var(--u) * 6); background: #fff; color: var(--text, #0B0C10);
           font-size: calc(var(--u) * 5.2); font-weight: 800; text-align: center;
           box-shadow: 0 0 0 calc(var(--u) * 0.6) var(--accent),
                       0 calc(var(--u) * 0.8) calc(var(--u) * 3) rgba(0, 0, 0, 0.35); }
@@ -30,6 +31,7 @@
   const v = window.__hyperframes.getVariables();
   const root = document.getElementById("root");
   root.style.setProperty("--accent", v.accent);
+  document.getElementById("root").style.setProperty("--text", v.text_color || "#0B0C10");
   root.classList.add(v.position);
   document.getElementById("pill").textContent = v.text;
   const D = __D__;

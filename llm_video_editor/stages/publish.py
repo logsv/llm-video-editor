@@ -51,7 +51,10 @@ SYSTEM = (
 
 class _Thumb(Strict):
     clip_id: str
-    segment_id: int = Field(description="transcript segment whose moment makes a striking frame")
+    segment_id: int | None = Field(
+        None, description="transcript segment whose moment makes a striking frame")
+    at: float | None = Field(None, description="or: source seconds in the clip (footage "
+                             "without speech); the sharpest frame near it is used")
     text: str = Field(description="2-5 words, no emoji")
     style: Literal["bold", "question", "reveal"]
     why: str = Field(description="why a viewer would click, <= 15 words")
@@ -265,13 +268,25 @@ def make_thumbnails(edl: EDL, transcript: Transcript, starts: list[float], ideas
         if len(out) == 3:
             break
         hit = clips.get(idea.clip_id)
-        ct = transcript.for_clip(hit[0].source_clip_id) if hit else None
-        seg = next((s for s in ct.segments if s.id == idea.segment_id), None) if ct else None
-        if hit is None or seg is None:
-            warnings.append(f"thumbnail idea {idea.clip_id}#{idea.segment_id} is not in the cut")
-            continue
-        clip, t0 = hit
-        a, b = max(seg.start, clip.start), min(seg.end, clip.end)
+        where = f"{idea.clip_id}@{idea.at}s" if idea.at is not None else \
+            f"{idea.clip_id}#{idea.segment_id}"
+        if hit is not None and idea.at is not None:
+            clip, t0 = hit
+            if not clip.start <= idea.at <= clip.end:
+                warnings.append(f"thumbnail idea {where} is outside the clip "
+                                f"({clip.start:.1f}-{clip.end:.1f}s)")
+                continue
+            a = max(clip.start, idea.at - 0.5)
+            b = min(clip.end, idea.at + 0.5)
+        else:
+            ct = transcript.for_clip(hit[0].source_clip_id) if hit else None
+            seg = next((s for s in ct.segments if s.id == idea.segment_id), None) \
+                if ct and idea.segment_id is not None else None
+            if hit is None or seg is None:
+                warnings.append(f"thumbnail idea {where} is not in the cut")
+                continue
+            clip, t0 = hit
+            a, b = max(seg.start, clip.start), min(seg.end, clip.end)
         style = idea.style if idea.style not in {t.style for t in out} else \
             next(s for s in styles if s not in {t.style for t in out})
         n = len(out) + 1

@@ -251,7 +251,7 @@ def auto_edit(inputs: list[str], prompt: str, provider: Provider, opts: AutoOpti
             file = str(fetch(ws, hit))
             label = f"{hit.title!r} by {hit.creator or 'unknown'} ({hit.license}, {hit.provider})"
         bed = MusicTrack(track_id="auto-music", file=file, anchor_clip_id=edl.clips[0].clip_id,
-                         volume_db=-16.0 if opts.vertical else -20.0, loop=True, duck=True)
+                         volume_db=-8.0 if opts.vertical else -10.0, loop=True, duck=True)
         edit({"music": [*edl.music, bed]})
         return f"{label}, ducked under speech"
 

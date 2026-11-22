@@ -70,7 +70,9 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
   credits in `<ws>/media/credits.json`). Only licensed sources that allow commercial
   use and editing; never scrape social platforms or unlicensed web clips.
   `EDL.music` (music/sfx/voiceover) is mixed in render with ducking keyed to the
-  speech bus, levelled to measured speech loudness (`ffmpeg/graph.add_music`).
+  speech bus, levelled to measured speech loudness (`ffmpeg/graph.add_music`). Each
+  track file is measured and levelled to the speech first (`mix.music_level: speech`,
+  `render.level_to_speech`), so `volume_db` is relative to the voice.
   Cutaways: `stages/cutaways.py` (budgeted, may suggest none).
 - Publish: `stages/publish.py` writes `<video>.upload.md/.json` and thumbnails
   (`stages/thumbnails.py`); location is opt-in (`--geocode`, `--use-location`).
