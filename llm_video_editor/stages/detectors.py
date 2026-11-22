@@ -84,7 +84,7 @@ class YoloPersonDetector:
     def __init__(self, model: str = "yolo11n.pt", min_confidence: float = 0.4):
         from ultralytics import YOLO
 
-        self._model = YOLO(model)
+        self._model = YOLO(yolo_weights(model))
         self.min_confidence = min_confidence
 
     def detect(self, rgb: np.ndarray) -> list[Box]:
@@ -103,6 +103,15 @@ class YoloPersonDetector:
         pass
 
 
+def yolo_weights(name: str) -> str:
+    """Weights in ~/.cache/llmve/models (downloaded there once), never the working dir."""
+    if os.sep in name or "/" in name:
+        return name
+    d = Path(os.environ.get("LLMVE_CACHE") or Path.home() / ".cache" / "llmve") / "models"
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d / name)
+
+
 class YoloObjectDetector:
     """Everyday objects (COCO's 80 classes: animals such as cow, dog, horse, bird,
     elephant; vehicles; people; ...) with YOLO, locally. Needs the `pro` extra."""
@@ -112,7 +121,7 @@ class YoloObjectDetector:
     def __init__(self, model: str = "yolo11n.pt", min_confidence: float = 0.35):
         from ultralytics import YOLO
 
-        self._model = YOLO(model)
+        self._model = YOLO(yolo_weights(model))
         self.min_confidence = min_confidence
 
     def detect(self, rgb: np.ndarray) -> list[Box]:

@@ -42,6 +42,7 @@ def output_words(edl: EDL, transcript: Transcript, starts: list[float],
 
     Returns ``(start, end, text, clip_index)`` tuples.
     """
+    from .cut_audit import doubtful
     from .pacing import is_filler
 
     reps = {k.lower(): v for k, v in edl.captions.replacements.items()}
@@ -55,10 +56,41 @@ def output_words(edl: EDL, transcript: Transcript, starts: list[float],
         for w in ct.words():
             if w.end <= clip.start or w.start >= clip.start + dur or is_filler(w):
                 continue
+            if doubtful(w, ct.language):  # invented over wind or engine noise
+                continue
             s = max(0.0, w.start - clip.start)
             e = min(dur, w.end - clip.start)
             if e - s > 0.02:
                 out.append((round(t0 + s, 3), round(t0 + e, 3), fix_word(w.text, reps), i))
+    out += voiceover_words(edl, starts, sum(durations), reps)
+    return sorted(out)
+
+
+def voiceover_words(edl: EDL, starts: list[float], total: float,
+                    reps: dict[str, str] | None = None) -> list[tuple[float, float, str, int]]:
+    """Voice-over lines with text, spread over each line's length by word length (TTS
+    reads at an even pace, so this lands close to the spoken words)."""
+    from ..ffmpeg.probe import media_duration
+
+    index = {c.clip_id: i for i, c in enumerate(edl.clips)}
+    out = []
+    for m in edl.music:
+        if m.role != "voiceover" or not m.text or m.anchor_clip_id not in index:
+            continue
+        i = index[m.anchor_clip_id]
+        at = starts[i] + m.offset
+        try:
+            length = m.duration or max(0.0, media_duration(Path(m.file).expanduser())
+                                       - m.src_start)
+        except Exception:  # noqa: BLE001 - a missing file is reported by audit
+            continue
+        length = min(length, max(0.0, total - at))
+        words = m.text.split()
+        weights = [len(w) + 1 for w in words]
+        t, per = at, length / max(1, sum(weights))
+        for w, k in zip(words, weights, strict=True):
+            out.append((round(t, 3), round(t + k * per, 3), fix_word(w, reps or {}), i))
+            t += k * per
     return out
 
 

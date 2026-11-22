@@ -18,7 +18,7 @@ into one round, then run `uv run llmve finish <ws>` once.
 | "start with the result" / "hook first" | copy the clip holding that moment to the top of `clips` (cut-audit keeps the replay) |
 | "too slow" / "more energy" | `"pacing": {"tighten": true, "max_gap": 0.45, "punch_in": "alternate"}` |
 | "too choppy" | `"pacing": {"max_gap": 1.0, "punch_in": "off"}` |
-| "music too loud / quiet" | `volume_db` of the track in `music` (default -20 long-form, -16 vertical) or `"mix": {"duck_depth_db": 16}` for a deeper dip under speech |
+| "music too loud / quiet" | `volume_db` of the track in `music`, relative to the speech (default -10 long-form, -8 vertical; steps of 2-3 dB) or `"mix": {"duck_depth_db": 16}` for a deeper dip under speech |
 | "different music" | remove the track; `uv run llmve media search <ws> "<mood>" --kind music`, `media get`, `music add <ws> <file> --at c001 --loop` |
 | "no music" | `"music": []` |
 | "add a sound effect" | `uv run llmve media search <ws> "whoosh" --kind sfx`, then `music add ... --role sfx --at <clip> --offset <s>` |

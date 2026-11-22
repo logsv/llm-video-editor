@@ -51,7 +51,10 @@ SYSTEM = (
 
 class _Thumb(Strict):
     clip_id: str
-    segment_id: int = Field(description="transcript segment whose moment makes a striking frame")
+    segment_id: int | None = Field(
+        None, description="transcript segment whose moment makes a striking frame")
+    at: float | None = Field(None, description="or: source seconds in the clip (footage "
+                             "without speech); the sharpest frame near it is used")
     text: str = Field(description="2-5 words, no emoji")
     style: Literal["bold", "question", "reveal"]
     why: str = Field(description="why a viewer would click, <= 15 words")
@@ -142,7 +145,8 @@ def used_credits(ws: Workspace, edl: EDL) -> tuple[list[Credit], list[str]]:
     """Credits for every third-party file the cut uses (music, sfx, voice-over, B-roll)."""
     registry = {c.file: c for c in load_credits(ws).items}
     own = {str(p.resolve()) for p in ws.sources}
-    files = [m.file for m in edl.music] + [o.source_file for o in edl.overlays]
+    files = [m.file for m in edl.music if not m.generator]  # generated narration: disclosed
+    files += [o.source_file for o in edl.overlays]
     files += [c.source_file for c in edl.clips if c.role == "broll"]
     credits, missing = [], []
     for f in dict.fromkeys(str(Path(x).expanduser().resolve()) for x in files):
@@ -166,13 +170,21 @@ def credit_line(c: Credit) -> str:
     return line + (f" {c.landing_url}" if c.landing_url and c.landing_url not in line else "")
 
 
+def ai_voices(edl: EDL) -> list[str]:
+    """Engines and voices of generated narration in the cut, e.g. ["kokoro:af_heart"]."""
+    return sorted({m.generator for m in edl.music if m.role == "voiceover" and m.generator})
+
+
 def build_description(copy: _Copy, chapters: list[tuple[float, str]], credits: list[Credit],
-                      hashtags: list[str]) -> str:
+                      hashtags: list[str], ai_voice: list[str] | None = None) -> str:
     parts = [clean(copy.hook), clean(copy.body)]
     if chapters:
         parts.append("Chapters\n" + description_block(chapters).strip())
-    if credits:
-        lines = [f"- {credit_line(c)}" for c in credits]
+    lines = [f"- {credit_line(c)}" for c in credits]
+    if ai_voice:
+        engines = sorted({v.split(":")[0].capitalize() for v in ai_voice})
+        lines.append(f"- Narration: AI-generated voice ({', '.join(engines)})")
+    if lines:
         parts.append("Music and footage\n" + "\n".join(lines))
     if hashtags:
         parts.append(" ".join(hashtags))
@@ -232,7 +244,12 @@ def publish(ws: Workspace, provider: Provider | None, *, video: Path | None = No
     hashtags = fix_hashtags(copy.hashtags)
     credits, missing = used_credits(ws, edl)
     warnings += missing
-    description = build_description(copy, chapters, credits, hashtags)
+    voices = ai_voices(edl)
+    description = build_description(copy, chapters, credits, hashtags, voices)
+    if voices:
+        warnings.append(f"AI narration ({', '.join(voices)}): the description says so. In "
+                        "YouTube Studio, tick 'altered or synthetic content' if the voice "
+                        "could be mistaken for a real person")
     category = copy.category if copy.category in CATEGORIES else ""
     if not category:
         warnings.append(f"category {copy.category!r} is not a YouTube category; pick one in Studio")
@@ -265,19 +282,32 @@ def make_thumbnails(edl: EDL, transcript: Transcript, starts: list[float], ideas
         if len(out) == 3:
             break
         hit = clips.get(idea.clip_id)
-        ct = transcript.for_clip(hit[0].source_clip_id) if hit else None
-        seg = next((s for s in ct.segments if s.id == idea.segment_id), None) if ct else None
-        if hit is None or seg is None:
-            warnings.append(f"thumbnail idea {idea.clip_id}#{idea.segment_id} is not in the cut")
-            continue
-        clip, t0 = hit
-        a, b = max(seg.start, clip.start), min(seg.end, clip.end)
+        where = f"{idea.clip_id}@{idea.at}s" if idea.at is not None else \
+            f"{idea.clip_id}#{idea.segment_id}"
+        if hit is not None and idea.at is not None:
+            clip, t0 = hit
+            if not clip.start <= idea.at <= clip.end:
+                warnings.append(f"thumbnail idea {where} is outside the clip "
+                                f"({clip.start:.1f}-{clip.end:.1f}s)")
+                continue
+            a = max(clip.start, idea.at - 0.5)
+            b = min(clip.end, idea.at + 0.5)
+        else:
+            ct = transcript.for_clip(hit[0].source_clip_id) if hit else None
+            seg = next((s for s in ct.segments if s.id == idea.segment_id), None) \
+                if ct and idea.segment_id is not None else None
+            if hit is None or seg is None:
+                warnings.append(f"thumbnail idea {where} is not in the cut")
+                continue
+            clip, t0 = hit
+            a, b = max(seg.start, clip.start), min(seg.end, clip.end)
         style = idea.style if idea.style not in {t.style for t in out} else \
             next(s for s in styles if s not in {t.style for t in out})
         n = len(out) + 1
         target = video.with_name(f"{video.stem}.thumb{n}.jpg")
         frame = pick_frame(clip.source_file, a, max(b, a + 0.2),
                            video.with_name(f".{video.stem}.frame{n}.jpg"))
+        frame = _graded(frame, edl, clip)
         text = re.sub(r"\s+", " ", clean(idea.text)).strip()[:40] or "Watch this"
         used = render_thumbnail(frame, text, style, target, width=edl.width, height=edl.height,
                                 accent=accent, prefer_hyperframes=prefer_hyperframes)
@@ -287,6 +317,21 @@ def make_thumbnails(edl: EDL, transcript: Transcript, starts: list[float], ideas
                              renderer=used))
     if len(out) < 3:
         warnings.append(f"only {len(out)} thumbnail(s) could be made")
+    return out
+
+
+def _graded(frame: Path, edl: EDL, clip) -> Path:
+    """The thumbnail frame with the clip's correction and the video's look."""
+    from ..ffmpeg.runner import ffmpeg
+    from .grade import correction_filter, look_filter
+
+    pre, post = correction_filter(clip.color)
+    chain = ",".join(x for x in (pre, post, look_filter(edl.grade)) if x)
+    if not chain:
+        return frame
+    out = frame.with_name(frame.stem + ".graded.jpg")
+    ffmpeg("-i", str(frame), "-vf", chain, "-q:v", "2", str(out), timeout=60)
+    frame.unlink(missing_ok=True)
     return out
 
 

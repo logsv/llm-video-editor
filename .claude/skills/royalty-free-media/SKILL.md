@@ -26,7 +26,7 @@ uv run llmve media get <ws> openverse:<id>
 uv run llmve music add <ws> <ws>/media/<file>.mp3 --at c001            # bed, ducked
 uv run llmve music add <ws> <ws>/media/<sfx>.mp3 --at c004 --offset 1.2 --role sfx
 ```
-- Music beds: `--volume -18` (default) under talking, `--loop` for short loops,
+- Music beds: `--volume -10` (default; relative to the speech, files are levelled first) under talking, `--loop` for short loops,
   `--duration` to stop early. Ducking follows the speech level automatically.
 - **YouTube Audio Library / Creator Music** (no API): ask the user to open their
   Studio > Audio Library (or Creator Music filtered to "No cost"), download the

@@ -24,6 +24,7 @@ from typing import Literal
 from pydantic import Field
 
 from ..schemas import Strict
+from ..workspace import atomic_write_text
 
 
 def config_dir() -> Path:
@@ -59,9 +60,7 @@ def load_profile() -> Profile:
 def save_profile(profile: Profile) -> Path:
     profile = profile.model_copy(update={"updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
     p = profile_path()
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(profile.model_dump_json(indent=2))
-    tmp.replace(p)
+    atomic_write_text(p, profile.model_dump_json(indent=2))
     return p
 
 

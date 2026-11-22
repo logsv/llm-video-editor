@@ -68,3 +68,11 @@ def probe(path: str | Path) -> ProbeResult:
         channels=int(audio["channels"]) if audio and audio.get("channels") else None,
         rotation=rotation,
     )
+
+
+def media_duration(path: str | Path) -> float:
+    """Duration of any media file, audio-only included (``probe`` needs a video stream)."""
+    from .runner import ffprobe_json
+
+    fmt = ffprobe_json(Path(path)).get("format", {})
+    return float(fmt.get("duration") or 0.0)

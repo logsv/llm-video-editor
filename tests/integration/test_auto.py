@@ -78,6 +78,7 @@ def test_one_command_edits_approves_renders_and_publishes(setup, tmp_path):
     report = json.loads(out.with_suffix(".auto_report.json").read_text())
     status = {s["step"]: s["status"] for s in report["steps"]}
     assert status == {"watch": "done", "plan": "done", "pacing": "done", "captions": "done",
+                      "colour": "skipped",
                       "chapters": "done", "music": "done", "cutaways": "skipped",
                       "graphics": "skipped", "cut-audit": "done", "geometry": "done",
                       "review": "done", "render": "done", "publish": "done"}

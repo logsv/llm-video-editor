@@ -3,6 +3,7 @@
      Size placeholders (width, height, duration, unit) are filled by
      llm_video_editor.hyperframes.compose; text comes from --variables. -->
 <html lang="en" data-composition-variables='[
+  {"id":"text_color","type":"color","label":"Text colour","default":"#FFFFFF"},
   {"id":"title","type":"string","label":"Name","default":"Your Name"},
   {"id":"subtitle","type":"string","label":"Role","default":"What you do"},
   {"id":"accent","type":"color","label":"Accent","default":"#FFC93C"},
@@ -17,7 +18,7 @@
           font-family: "Inter", "Helvetica Neue", Arial, sans-serif; --u: __U__px; }
   #card { position: absolute; left: max(calc(var(--u) * 6), 6%); bottom: calc(var(--u) * 12);
           display: flex; align-items: stretch; border-radius: calc(var(--u) * 1.2);
-          background: rgba(12, 14, 20, 0.88); color: #fff; overflow: hidden;
+          background: rgba(12, 14, 20, 0.88); color: var(--text, #FFFFFF); overflow: hidden;
           box-shadow: 0 calc(var(--u) * 0.6) calc(var(--u) * 2.4) rgba(0, 0, 0, 0.35); }
   #bar { width: calc(var(--u) * 0.7); background: var(--accent); }
   #text { padding: calc(var(--u) * 1.6) calc(var(--u) * 2.6) calc(var(--u) * 1.6) calc(var(--u) * 2.2); }
@@ -41,6 +42,7 @@
   const v = window.__hyperframes.getVariables();
   const root = document.getElementById("root");
   root.style.setProperty("--accent", v.accent);
+  document.getElementById("root").style.setProperty("--text", v.text_color || "#FFFFFF");
   root.classList.add(v.position);
   if (__H__ > __W__) root.classList.add("portrait");
   document.getElementById("title").textContent = v.title;

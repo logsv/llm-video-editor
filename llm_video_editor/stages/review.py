@@ -21,6 +21,7 @@ from ..schemas.geometry import BBox
 from ..workspace import Workspace
 from .captions import group_cues, output_words, write_captions
 from .geometry import apply_geometry, edl_hash, load_geometry
+from .grade import correction_filter, look_filter
 
 TILE_BOX = 360
 
@@ -52,14 +53,16 @@ def _label(text: str, h: int) -> str:
 def _tile(out: Path, edl: EDL, src: str, src_t: float, t_out: float, center, box: BBox | None,
           label: str, work: Path, has_ass: bool, overlay: tuple[str, float, str, str] | None,
           tile: tuple[int, int], zoom: float = 1.0,
-          graphic: tuple[str, float, tuple[float, float, float, float] | None] | None = None
-          ) -> None:
+          graphic: tuple[str, float, tuple[float, float, float, float] | None] | None = None,
+          color: tuple[str, str] = ("", "")) -> None:
     W, H = edl.width, edl.height
     # Composite with every input starting at 0 and shift the result to t_out once, just
     # before the captions: shifting each input separately rounds differently per time
     # base (WebM 1/1000 vs MP4 1/15360), and overlay then emits the first base frame
     # before the layer above is "due", so the single captured frame lacks it.
-    base = f"[0:v]{fit_filter(W, H, edl.fit_mode, center, zoom)},setsar=1,setpts=PTS-STARTPTS"
+    fit = ",".join(x for x in (color[0], fit_filter(W, H, edl.fit_mode, center, zoom),
+                               color[1]) if x)
+    base = f"[0:v]{fit},setsar=1,setpts=PTS-STARTPTS"
     chain = []
     args = ["-ss", f"{src_t:.3f}", "-i", src]
     if overlay:
@@ -76,6 +79,10 @@ def _tile(out: Path, edl: EDL, src: str, src_t: float, t_out: float, center, box
         chain.append(f"[1:v]{ofit},setsar=1,setpts=PTS-STARTPTS[ov]")
         chain.append(f"{base}[b]")
         base = f"[b][ov]overlay=x={x}:y={y}"
+    look = look_filter(edl.grade)
+    if look:  # the whole-video look, on the footage only (graphics sit above it)
+        chain.append(f"{base}[lk]")
+        base = f"[lk]{look}"
     if graphic:
         g_src, g_t, g_box = graphic
         n = 2 if overlay else 1
@@ -131,7 +138,7 @@ def build_review(ws: Workspace, edl: EDL | None = None, *, cols: int = 6, rows: 
         mid = seg.duration / 2
         p = placements.get(clip.clip_id)
         box = p.subject_box_out if p else None
-        if p and p.caption_overlap > 0:
+        if p and p.caption_overlap > 0 and edl.captions.enabled:
             warnings.append(f"{clip.clip_id}: caption band still overlaps the subject "
                             f"({p.caption_overlap:.0%})")
         jobs.append((clip, seg.source_file, seg.start + mid, t0 + mid, box, None))
@@ -156,12 +163,13 @@ def build_review(ws: Workspace, edl: EDL | None = None, *, cols: int = 6, rows: 
             overlay = (spec.source_file, spec.src_start + spec.duration / 2, ov.zone, ov.corner)
             label = f"{ov.overlay_id} over {clip.clip_id} {t_out:.1f}s"
         _tile(work / f"tile_{n:03d}.png", edl, src, src_t, t_out, clip.crop_center, box, label,
-              work, has_ass, overlay, tile, clip.zoom, graphic)
+              work, has_ass, overlay, tile, clip.zoom, graphic, correction_filter(clip.color))
         if graphic:
             try:
                 from .text_safety import frame_rgb, graphic_rgba, measure
 
-                chk = measure(edl, frame_rgb(edl, src, src_t, clip.crop_center, clip.zoom),
+                chk = measure(edl, frame_rgb(edl, src, src_t, clip.crop_center, clip.zoom,
+                                             color=clip.color),
                               graphic_rgba(edl, graphic[0], graphic[1], graphic[2]),
                               graphic_id=ovp[2].graphic_id, t_out=t_out, subject_box=box,
                               caption_position=clip.caption_position or "bottom")

@@ -23,6 +23,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..schemas import EDL, ClipsManifest, Transcript
+from ..stages.cut_audit import doubtful
 from ..workspace import Workspace, check_output_path
 from . import jobs, ops
 from .edits import EditConflict, EditError, EditStore
@@ -214,7 +215,8 @@ class TranscriptP(WsP):
 
 @tool("transcript", "look", TranscriptP)
 def transcript(ctx: Context, p: TranscriptP) -> dict:
-    """Transcript segments (ids, source times, text, retake and low-confidence hints)."""
+    """Transcript segments (ids, source times, text, retake and low-confidence hints).
+    doubtful_words counts words ASR probably invented over noise (wind, engine)."""
     from ..stages.plan import retake_ids
 
     ws = _ws(p.workspace)
@@ -229,7 +231,8 @@ def transcript(ctx: Context, p: TranscriptP) -> dict:
                 continue
             lines.append({"clip_id": ct.clip_id, "id": s.id, "start": s.start, "end": s.end,
                           "text": s.text, "retake": s.id in retakes,
-                          "unclear_words": sum(w.prob < 0.5 for w in s.words)})
+                          "unclear_words": sum(w.prob < 0.5 for w in s.words),
+                          "doubtful_words": sum(doubtful(w, ct.language) for w in s.words)})
     return {"segments": lines[:p.max_lines], "truncated": len(lines) > p.max_lines,
             "language": {c.clip_id: c.language for c in tr.clips}}
 
@@ -259,7 +262,8 @@ def speech_map(ctx: Context, p: SpeechMapP) -> dict:
     if end - prev >= p.min_pause:
         pauses.append({"start": round(prev, 3), "end": round(end, 3),
                        "seconds": round(end - prev, 3)})
-    return {"words": [{"start": w.start, "end": w.end, "text": w.text, "prob": w.prob}
+    return {"words": [{"start": w.start, "end": w.end, "text": w.text, "prob": w.prob,
+                       **({"doubtful": True} if doubtful(w, ct.language) else {})}
                       for w in words][:3000],
             "pauses": pauses}
 
@@ -591,6 +595,61 @@ def set_mix(ctx: Context, p: FieldsP) -> dict:
     return _edit(p, ops.set_mix, p.fields, "set_mix")
 
 
+@tool("set_grade", "edit", FieldsP)
+def set_grade(ctx: Context, p: FieldsP) -> dict:
+    """One look for the whole video: look (none, natural, warm, golden-hour, teal-orange,
+    cinematic, vivid, matte, bw), strength 0-1 (0.4-0.6 reads premium), or lut (a .cube
+    file). Applied to the footage only, never to graphics."""
+    return _edit(p, ops.set_grade, p.fields, "set_grade")
+
+
+class ColorP(EditP):
+    clip_id: str
+    fields: dict[str, Any] = Field(default_factory=dict, description="exposure (EV), "
+                                   "contrast, saturation, warmth, tint, tonemap (HDR); "
+                                   "{} resets the clip")
+
+
+@tool("set_color", "edit", ColorP)
+def set_color(ctx: Context, p: ColorP) -> dict:
+    """Per-clip correction so clips match each other (use color_report's suggestions);
+    looks belong on set_grade."""
+    return _edit(p, ops.set_color, {"clip_id": p.clip_id, **p.fields}, "set_color")
+
+
+class ColorReportP(WsP):
+    samples: int = Field(3, ge=1, le=8, description="frames measured per clip")
+
+
+@tool("color_report", "look", ColorReportP)
+def color_report(ctx: Context, p: ColorReportP) -> dict:
+    """Measure every clip of the current edit (exposure, contrast, saturation, colour
+    cast, clipping), how consistent they are, suggested per-clip corrections towards
+    the median clip, HDR clips that need tone mapping, and warnings about the current
+    grade. Measures the ungraded source."""
+    import statistics
+
+    from ..stages.grade import color_warnings, measure_clip, suggest_matches
+
+    ws = _ws(p.workspace)
+    edl = EditStore(ws).current()
+    facts = {Path(k).resolve(): v for k, v in _footage(ws).items()}
+    measured, hdr = {}, []
+    for c in edl.clips:
+        measured[c.clip_id] = measure_clip(c.source_file, c.start, c.end, p.samples)
+        f = facts.get(Path(c.source_file).resolve(), {})
+        if f.get("hdr") and not (c.color and c.color.tonemap):
+            hdr.append(c.clip_id)
+    sug = suggest_matches(measured)
+    spread = {k: round(statistics.pstdev([m[k] for m in measured.values()]), 3)
+              for k in ("mid", "saturation", "warm")} if len(measured) > 1 else {}
+    return {"clips": [{"clip_id": cid, **m, **sug[cid]} for cid, m in measured.items()],
+            "spread": spread, "hdr_needs_tonemap": hdr,
+            "grade": edl.grade.model_dump(), "warnings": color_warnings(edl),
+            "note": "mid ~0.35-0.5 is a normal exposure; spread above ~0.08 (mid) or 0.06 "
+                    "(warm) shows as clips not matching"}
+
+
 class OutputP(EditP):
     target_duration: float | None = None
     clear_target: bool = False
@@ -648,7 +707,8 @@ _BATCHABLE = {"add_clip": ops.add_clip, "remove_clip": ops.remove_clip,
               "set_pacing": ops.set_pacing, "set_captions": ops.set_captions,
               "set_mix": ops.set_mix, "set_output": ops.set_output,
               "add_item": ops.add_item, "update_item": ops.update_item,
-              "remove_item": ops.remove_item}
+              "remove_item": ops.remove_item, "set_grade": ops.set_grade,
+              "set_color": ops.set_color}
 
 
 # per-call keys of the standalone tools that a batch sets once for all its operations
@@ -735,9 +795,15 @@ def audit_tool(ctx: Context, p: WsP) -> dict:
     _, rep = _agent_audit(ws, write=False)
     EditStore(ws).note("check", "audit", {}, "", f"{len(rep.violations)} findings, "
                        f"{'ok' if rep.passed else 'blocking errors'}")
+    from ..stages.grade import color_warnings
+
+    vo = _vo_report(EditStore(ws).current(), ws)
+    colour = color_warnings(EditStore(ws).current())
     return {"passed": rep.passed, "duration_after_pacing": rep.duration_after,
             "pauses_removed": rep.pauses_removed,
-            "findings": [v.model_dump(exclude_none=True) for v in rep.violations]}
+            "findings": [v.model_dump(exclude_none=True) for v in rep.violations],
+            "voiceover": [r for r in vo if r["issues"]] or "no voice-over issues",
+            "color": colour or "no colour issues"}
 
 
 class ReviewP(WsP):
@@ -851,7 +917,8 @@ class PublishP(WsP):
     category: str
     pinned_comment: str = ""
     thumbnails: list[dict[str, Any]] = Field(
-        default_factory=list, description="up to 3: {clip_id, segment_id, text, style "
+        default_factory=list, description="up to 3: {clip_id, segment_id or at (source "
+        "seconds in the clip, for footage without speech), text, style "
         "(bold|question|reveal), why}")
     video: str | None = None
     geocode: bool = False
@@ -937,6 +1004,162 @@ def job_status(ctx: Context, p: JobStatusP) -> dict:
     if job["status"] == "done" and ctx.privacy == "stills":
         ctx.images_out = job.get("images", [])
     return jobs.summary(job)
+
+
+# =============================================================================== voice-over
+class VoicesP(P):
+    engine: str = Field("auto", description="kokoro | say | auto")
+    language: str | None = Field(None, description="filter, e.g. Hindi, en-gb")
+
+
+@tool("voices", "look", VoicesP)
+def voices_tool(ctx: Context, p: VoicesP) -> dict:
+    """Voices for narration on this machine (local engines only; nothing is uploaded):
+    engine, voice id, language, gender, licence."""
+    from ..voice import EngineUnavailable, list_voices
+
+    try:
+        vs = list_voices(p.engine, p.language)
+    except EngineUnavailable as e:
+        raise ValueError(str(e)) from e
+    return {"voices": [vars(v) for v in vs][:200],
+            "note": "kokoro voice ids: a=US English, b=UK English, h=Hindi; f/m = female/male "
+                    "(af_heart, am_michael, bf_emma, bm_george, hf_alpha, hm_omega, ...)"}
+
+
+class VoLine(P):
+    text: str = Field(min_length=1, max_length=400,
+                      description="the line as it should be heard and captioned")
+    anchor_clip_id: str = Field(description="edit clip the line starts on")
+    offset: float = Field(0.0, ge=0, description="seconds after that clip starts")
+    voice: str | None = None
+    speed: float | None = Field(None, ge=0.5, le=1.6)
+    volume_db: float | None = Field(None, ge=-30, le=12,
+                                    description="relative to the speech; default 0")
+
+
+class VoiceoverP(EditP):
+    lines: list[VoLine] = Field(min_length=1, max_length=60)
+    engine: str = Field("auto", description="kokoro | say | auto")
+    voice: str = Field("af_heart", description="default voice for lines without one")
+    speed: float = Field(1.0, ge=0.5, le=1.6)
+    lang: str | None = Field(None, description="override the voice's language, e.g. hi")
+    audition: bool = Field(False, description="only synthesize and report lengths; the "
+                           "edit is not changed")
+
+
+def _vo_report(edl: EDL, ws: Workspace) -> list[dict]:
+    """Where each voice-over sits and what it collides with (a report)."""
+    from ..ffmpeg.probe import media_duration
+    from ..stages.captions import output_words
+
+    starts = edl.output_starts()
+    index = {c.clip_id: i for i, c in enumerate(edl.clips)}
+    total = edl.total_duration
+    durations = [c.duration for c in edl.clips]
+    speech = output_words(edl.model_copy(update={"music": []}),
+                          Workspace.read(ws.transcript, Transcript), starts, durations) \
+        if ws.transcript.exists() else []
+    spans = []
+    for m in edl.music:
+        if m.role != "voiceover" or m.anchor_clip_id not in index:
+            continue
+        a = starts[index[m.anchor_clip_id]] + m.offset
+        try:
+            length = m.duration or media_duration(Path(m.file).expanduser()) - m.src_start
+        except Exception:  # noqa: BLE001
+            length = 0.0
+        spans.append((m, a, a + length))
+    out = []
+    for m, a, b in spans:
+        talk = sum(max(0.0, min(b, we) - max(a, ws_)) for ws_, we, _, _ in speech)
+        others = [o.track_id for o, oa, ob in spans if o is not m and oa < b and ob > a]
+        issues = []
+        if talk > 0.15:
+            issues.append(f"over {talk:.1f}s of speech in the clips")
+        if others:
+            issues.append(f"overlaps voice-over {', '.join(others)}")
+        if b > total + 0.05:
+            issues.append(f"runs {b - total:.1f}s past the end of the video")
+        if not Path(m.file).expanduser().exists():
+            issues.append("audio file missing")
+        out.append({"track_id": m.track_id, "text": m.text, "from": round(a, 2),
+                    "to": round(b, 2), "issues": issues})
+    return out
+
+
+@tool("voiceover", "edit", VoiceoverP)
+def voiceover_tool(ctx: Context, p: VoiceoverP) -> dict:
+    """Narration lines you wrote, spoken by a local voice and added as voice-over tracks
+    (one version). Each line is clean 48 kHz audio, levelled to the speech at render;
+    music ducks under it and the clips' own sound dips (mix.clip_duck_db). Captions use
+    the text. Returns each line's exact length and what it collides with."""
+    from ..voice import EngineUnavailable, get_engine, synthesize
+
+    ws = _ws(p.workspace)
+    try:
+        eng = get_engine(p.engine)
+    except EngineUnavailable as e:
+        raise ValueError(str(e)) from e
+    made = []
+    for ln in p.lines:
+        voice = ln.voice or p.voice
+        if eng.name == "say" and voice == "af_heart":
+            voice = "Samantha"
+        made.append((ln, synthesize(ws.root, eng, ln.text, voice, speed=ln.speed or p.speed,
+                                    lang=p.lang)))
+    lines = [{"text": line.text, "spoken": line.spoken, "seconds": line.duration,
+              "voice": line.voice, "file": line.file} for _, line in made]
+    if p.audition:
+        return {"lines": lines, "note": "audition only: the edit is unchanged"}
+
+    def add_all(edl: EDL) -> EDL:
+        manifest = _manifest(ws)
+        for ln, line in made:
+            fields = {"file": line.file, "role": "voiceover", "anchor_clip_id": ln.anchor_clip_id,
+                      "offset": ln.offset, "text": line.text,
+                      "generator": f"{line.engine}:{line.voice}"}
+            if ln.volume_db is not None:
+                fields["volume_db"] = ln.volume_db
+            edl = ops.add_item(edl, manifest, kind="music", **fields)
+        return edl
+
+    store = EditStore(ws)
+    ch = store.apply("voiceover", {"lines": [ln.model_dump() for ln in p.lines],
+                                   "engine": eng.name, "voice": p.voice}, p.reason, add_all,
+                     expected_version=p.expected_version)
+    report = _vo_report(store.current(), ws)
+    new_ids = {r["track_id"] for r in report[-len(made):]}
+    return {"version": ch.version, "summary": ch.summary, "lines": lines,
+            "fit": [r for r in report if r["track_id"] in new_ids]}
+
+
+class PronounceP(P):
+    reason: str = Field(min_length=3)
+    say_as: dict[str, str] = Field(description="word -> respelling, e.g. "
+                                   "{\"Khajuraho\": \"Kha-joo-raa-ho\"}")
+    scope: Literal["project", "all"] = Field("project", description="this workspace, or "
+                                             "every project (your config folder)")
+    workspace: str | None = None
+
+
+@tool("pronounce", "edit", PronounceP)
+def pronounce_tool(ctx: Context, p: PronounceP) -> dict:
+    """How the narrator says names (places, people): respellings applied before speech;
+    captions keep the real spelling. Re-run voiceover for lines that use them."""
+    from ..voice.synth import voice_dir
+    from .setup import config_dir
+
+    if p.scope == "project":
+        if not p.workspace:
+            raise ValueError("scope project needs the workspace")
+        path = voice_dir(_ws(p.workspace).root) / "lexicon.json"
+    else:
+        path = config_dir() / "lexicon.json"
+    lex = json.loads(path.read_text()) if path.exists() else {}
+    lex.update(p.say_as)
+    path.write_text(json.dumps(lex, indent=1, ensure_ascii=False))
+    return {"lexicon": lex, "file": str(path)}
 
 
 # =============================================================================== profile

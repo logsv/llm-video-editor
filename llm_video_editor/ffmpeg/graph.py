@@ -24,6 +24,8 @@ class Segment:
     has_audio: bool
     crop_center: tuple[float, float] | None = None
     zoom: float = 1.0  # punch-in on top of the cover crop
+    color_pre: str = ""  # before the fit (HDR tone mapping)
+    color_post: str = ""  # after the fit (per-clip correction)
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,8 @@ class Ducking:
     attack_ms: float = 20.0
     release_ms: float = 450.0
     key_gain_db: float = 0.0
+    clip_depth_db: float = 0.0  # the clips' own audio dips this far under voice-overs
+    vo_key_gain_db: float = 0.0  # brings the voice-over bus to KEY_LEVEL_DB
 
 
 KEY_LEVEL_DB = -20.0  # speech level the sidechain key is normalised to
@@ -130,9 +134,11 @@ def fit_filter(width: int, height: int, mode: FitMode = "cover",
             f"crop={width}:{height}:{x}:{y}")
 
 
-def _video_chain(idx: int, dur: float, fps: int, fit: str, label: str, shift: float = 0.0) -> str:
+def _video_chain(idx: int, dur: float, fps: int, fit: str, label: str, shift: float = 0.0,
+                 pre: str = "", post: str = "") -> str:
     pad = 2 / fps
     tail = f"setpts=PTS-STARTPTS+{shift:.6f}/TB" if shift else "setpts=PTS-STARTPTS"
+    fit = ",".join(x for x in (pre, fit, post) if x)
     return (f"[{idx}:v:0]setpts=PTS-STARTPTS,fps={fps},{fit},setsar=1,format=yuv420p,"
             f"tpad=stop_mode=clone:stop_duration={pad:.6f},trim=duration={dur:.6f},{tail}[{label}]")
 
@@ -149,7 +155,8 @@ def add_segments(g: Graph, segments: list[Segment], *, width: int, height: int, 
         if not audio_only:
             g.filters.append(_video_chain(idx, seg.duration, fps,
                                           fit_filter(width, height, mode, seg.crop_center,
-                                                     seg.zoom), v))
+                                                     seg.zoom), v,
+                                          pre=seg.color_pre, post=seg.color_post))
         if seg.has_audio:
             g.filters.append(
                 f"[{idx}:a:0]asetpts=PTS-STARTPTS,aresample=48000,{AUDIO_FMT},"
@@ -165,6 +172,14 @@ def add_segments(g: Graph, segments: list[Segment], *, width: int, height: int, 
     g.filters.append("".join(f"[{v}][{a}]" for v, a in pairs)
                      + f"concat=n={n}:v=1:a=1[{prefix}vcat][{prefix}acat]")
     return f"{prefix}vcat", f"{prefix}acat"
+
+
+def add_filter(g: Graph, base: str, chain: str, label: str) -> str:
+    """Apply a filter chain to a video stream ("" keeps it as is)."""
+    if not chain:
+        return base
+    g.filters.append(f"[{base}]{chain}[{label}]")
+    return label
 
 
 def add_overlays(g: Graph, base: str, overlays: list[OverlaySpec], *, width: int, height: int,
@@ -230,17 +245,28 @@ def _track_chain(g: Graph, t: MusicSpec, total: float) -> str:
                     f"apad=whole_dur={total:.6f}")
 
 
-def add_speech(g: Graph, voice: str, tracks: list[MusicSpec], *, total: float) -> str:
-    """The speech bus: the clips' own audio plus every voice-over track."""
+def add_speech(g: Graph, voice: str, tracks: list[MusicSpec], *, total: float,
+               ducking: Ducking | None = None) -> str:
+    """The speech bus: the clips' own audio plus every voice-over track. With
+    ``ducking.clip_depth_db`` the clips' own sound dips under the voice-overs."""
     vos = [t for t in tracks if t.role == "voiceover"]
     if not vos:
         return voice
-    labels = [voice]
     for i, t in enumerate(vos):
         g.filters.append(_track_chain(g, t, total) + f"[vo{i}]")
-        labels.append(f"vo{i}")
-    g.filters.append("".join(f"[{x}]" for x in labels)
-                     + f"amix=inputs={len(labels)}:duration=first:normalize=0[speech]")
+    if len(vos) > 1:
+        g.filters.append("".join(f"[vo{i}]" for i in range(len(vos)))
+                         + f"amix=inputs={len(vos)}:duration=first:normalize=0[vobus]")
+    else:
+        g.filters.append("[vo0]anull[vobus]")
+    if ducking is not None and ducking.clip_depth_db > 0:
+        g.filters.append("[vobus]asplit=2[vomix][vokeyraw]")
+        g.filters.append(f"[vokeyraw]volume={ducking.vo_key_gain_db:.2f}dB[vokey]")
+        clip_duck = Ducking(ducking.clip_depth_db, ducking.attack_ms, ducking.release_ms)
+        g.filters.append(f"[{voice}][vokey]{duck_filter(clip_duck)}[scene]")
+        g.filters.append("[scene][vomix]amix=inputs=2:duration=first:normalize=0[speech]")
+    else:
+        g.filters.append(f"[{voice}][vobus]amix=inputs=2:duration=first:normalize=0[speech]")
     return "speech"
 
 
@@ -252,7 +278,7 @@ def add_music(g: Graph, voice: str, tracks: list[MusicSpec], *, total: float,
     loudness measurement of the speech), so the dip depends on whether someone is
     talking, not on how loud the recording happens to be.
     """
-    speech = add_speech(g, voice, tracks, total=total)
+    speech = add_speech(g, voice, tracks, total=total, ducking=ducking)
     beds = [t for t in tracks if t.role != "voiceover"]
     if not beds:
         return speech

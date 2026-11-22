@@ -3,10 +3,12 @@
      Size placeholders (width, height, duration, unit) are filled by
      llm_video_editor.hyperframes.compose; text comes from --variables. -->
 <html lang="en" data-composition-variables='[
+  {"id":"text_color","type":"color","label":"Text colour","default":"#FFFFFF"},
   {"id":"title","type":"string","label":"Place","default":"Khajuraho"},
   {"id":"subtitle","type":"string","label":"Detail (region, road, distance)","default":"Madhya Pradesh, India"},
   {"id":"accent","type":"color","label":"Pin colour","default":"#FF5A4E"},
-  {"id":"position","type":"string","label":"top-left | bottom-left | top-right | center","default":"top-left"}
+  {"id":"position","type":"string","label":"top-left | bottom-left | top-right | center","default":"top-left"},
+  {"id":"style","type":"string","label":"shadow | card (a panel behind the text, for busy or bright shots)","default":"shadow"}
 ]'>
 <head>
 <meta charset="utf-8">
@@ -16,8 +18,11 @@
   #root { position: relative; width: __W__px; height: __H__px; overflow: hidden;
           font-family: "Inter", "Helvetica Neue", Arial, sans-serif; --u: __U__px; }
   #card { position: absolute; left: max(calc(var(--u) * 6), 6%); top: max(calc(var(--u) * 7), 6%);
-          display: flex; align-items: center; gap: calc(var(--u) * 1.6); color: #fff;
-          text-shadow: 0 calc(var(--u) * 0.3) calc(var(--u) * 1.6) rgba(0, 0, 0, 0.75); }
+          display: flex; align-items: center; gap: calc(var(--u) * 1.6); color: var(--text, #FFFFFF);
+          text-shadow: 0 calc(var(--u) * 0.3) calc(var(--u) * 1.6) var(--halo, rgba(0, 0, 0, 0.75)); }
+  .card #card { background: var(--panel, rgba(12, 14, 20, 0.78)); text-shadow: none;
+                padding: calc(var(--u) * 1.6) calc(var(--u) * 2.6) calc(var(--u) * 1.6) calc(var(--u) * 2);
+                border-radius: calc(var(--u) * 1.2); }
   #pin { width: calc(var(--u) * 5.2); height: calc(var(--u) * 5.2); flex: none;
          filter: drop-shadow(0 calc(var(--u) * 0.3) calc(var(--u) * 0.8) rgba(0, 0, 0, 0.6)); }
   #pin path { fill: var(--accent); }
@@ -53,7 +58,16 @@
   const v = window.__hyperframes.getVariables();
   const root = document.getElementById("root");
   root.style.setProperty("--accent", v.accent);
+  document.getElementById("root").style.setProperty("--text", v.text_color || "#FFFFFF");
   root.classList.add(v.position);
+  if (v.style === "card") root.classList.add("card");
+  // dark text gets a light halo/panel, light text a dark one
+  const hex = (v.text_color || "#FFFFFF").replace("#", "");
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.substr(i, 2), 16) / 255);
+  if (0.2126 * r + 0.7152 * g + 0.0722 * b < 0.45) {
+    root.style.setProperty("--halo", "rgba(255, 255, 255, 0.8)");
+    root.style.setProperty("--panel", "rgba(250, 250, 248, 0.86)");
+  }
   if (__H__ > __W__) root.classList.add("portrait");
   document.getElementById("title").textContent = v.title;
   document.getElementById("subtitle").textContent = v.subtitle;

@@ -24,7 +24,8 @@ chose this workflow) -> render -> publish, and prints one line per step
 (`done` / `skip` with the reason / `fail`). Useful options:
 `--name "Jane Doe|Founder"`, `--music-query "lofi chill"`, `--music off|<file>`,
 `--no-cutaways`, `--no-humor`, `--pacing natural`, `--captions burn`,
-`--broll-library <dir>`, `--draft` (fast preview), `--review` (stop at the
+`--broll-library <dir>`, `--look warm|golden-hour|teal-orange|cinematic|natural|...`
+(`--look-strength 0.5`, `--match-color` to make clips match), `--draft` (fast preview), `--review` (stop at the
 sheet instead of approving). Long recordings: it chunks ASR automatically.
 YouTube lengths from 2 to 50 minutes work (`--target-duration 2m` ... `50m`): speech
 comes first and, when it can't fill the length, shots from clips without speech fill

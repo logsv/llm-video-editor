@@ -41,6 +41,9 @@ class AutoOptions:
     cutaways: bool = True
     humor: bool = True
     graphics: bool = True
+    look: str = "none"  # one look for the video: natural, warm, golden-hour, teal-orange, ...
+    look_strength: float = 0.5
+    match_color: bool = False  # correct each clip towards the median clip (consistency)
     name: str | None = None  # "Jane Doe|Founder" -> lower third in the first minute
     broll_library: Path | None = None
     approve: bool = True  # False: stop at the review sheet like `llmve run`
@@ -210,6 +213,31 @@ def auto_edit(inputs: list[str], prompt: str, provider: Provider, opts: AutoOpti
 
     run.step("captions", do_captions)
 
+    def do_color():
+        if opts.look == "none" and not opts.match_color:
+            return "skipped: no look and no colour matching asked (--look, --match-color)"
+        from ..schemas import ClipColor, Grade
+        from .grade import color_warnings, measure_clip, suggest_matches
+
+        edl = Workspace.read(ws.edl_raw, EDL)
+        notes = []
+        if opts.match_color:
+            measured = {c.clip_id: measure_clip(c.source_file, c.start, c.end)
+                        for c in edl.clips}
+            sug = suggest_matches(measured)
+            clips = [c.model_copy(update={"color": ClipColor(**sug[c.clip_id]["suggested"])})
+                     if sug[c.clip_id]["suggested"] else c for c in edl.clips]
+            n = sum(1 for c in clips if c.color is not None)
+            notes.append(f"matched {n} of {len(clips)} clips")
+            edl = edl.model_copy(update={"clips": clips})
+        edl = edl.model_copy(update={"grade": Grade(look=opts.look,
+                                                    strength=opts.look_strength)})
+        Workspace.write(ws.edl_raw, edl)
+        report.warnings += color_warnings(edl)
+        return "; ".join([f"look {opts.look} at {opts.look_strength:.1f}", *notes])
+
+    run.step("colour", do_color)
+
     def do_chapters():
         from .chapters import suggest_chapters
 
@@ -251,7 +279,7 @@ def auto_edit(inputs: list[str], prompt: str, provider: Provider, opts: AutoOpti
             file = str(fetch(ws, hit))
             label = f"{hit.title!r} by {hit.creator or 'unknown'} ({hit.license}, {hit.provider})"
         bed = MusicTrack(track_id="auto-music", file=file, anchor_clip_id=edl.clips[0].clip_id,
-                         volume_db=-16.0 if opts.vertical else -20.0, loop=True, duck=True)
+                         volume_db=-8.0 if opts.vertical else -10.0, loop=True, duck=True)
         edit({"music": [*edl.music, bed]})
         return f"{label}, ducked under speech"
 

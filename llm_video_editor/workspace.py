@@ -32,6 +32,24 @@ def _sha1(data: str) -> str:
     return hashlib.sha1(data.encode("utf-8")).hexdigest()
 
 
+def atomic_write_text(path: Path, text: str) -> Path:
+    """Write via a temp file unique to this process and thread, then rename: background
+    jobs and tool calls may write the same checkpoint at once, and a shared temp name
+    let one rename the other's file away."""
+    import threading
+    import uuid
+
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}."
+                         f"{uuid.uuid4().hex[:6]}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return path
+
+
 def is_media(path: Path) -> bool:
     return path.suffix.lower() in MEDIA_EXTENSIONS
 
@@ -240,10 +258,7 @@ class Workspace:
     @staticmethod
     def write(path: Path, model: BaseModel) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(model.model_dump_json(indent=2))
-        tmp.replace(path)
-        return path
+        return atomic_write_text(path, model.model_dump_json(indent=2))
 
     @staticmethod
     def read(path: Path, model: type[M]) -> M:
@@ -279,6 +294,4 @@ class Workspace:
         return {"stages": {}}
 
     def _save_manifest(self) -> None:
-        tmp = self.manifest_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self._manifest, indent=2))
-        tmp.replace(self.manifest_path)
+        atomic_write_text(self.manifest_path, json.dumps(self._manifest, indent=2))
