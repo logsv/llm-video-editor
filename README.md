@@ -1,12 +1,21 @@
 # LLM Video Editor
 
-Prompt-driven video editing for YouTube (16:9) and Shorts/Reels/TikTok (9:16).
-Point it at a clip or a folder of raw footage and describe the cut you want. It
-transcribes, plans and audits the cut, keeps captions and overlays off the
-speaker's face, adds chapters, jump-cut pacing, motion graphics, ducked music and
-a few licensed cutaways when you ask, shows you a preview sheet to approve,
-renders once (normalised to -14 LUFS), and writes an upload file with SEO title,
-description, tags and three thumbnails next to the video.
+Prompt-driven video editing for YouTube (16:9, 2 minutes to an hour) and
+Shorts/Reels/TikTok (9:16). Point it at a clip or a folder of raw footage and
+describe the cut you want. It transcribes, plans and audits the cut, keeps captions
+and titles off faces, adds chapters, jump-cut pacing, place titles and labels,
+colour grading, ducked licensed music, optional AI narration and a few licensed
+cutaways where they help, renders once (normalised to -14 LUFS), and writes an
+upload file with SEO title, description, tags and three thumbnails next to the video.
+
+Two ways to edit:
+- **One command** (`llmve auto`): a tested pipeline makes every decision, then you give
+  notes and Claude applies them.
+- **Agent mode**: Claude is the editor and decides every cut, title, colour and line of
+  narration through the `llmve` tools; the code executes, checks and records.
+
+Your footage never leaves your machine: only text (and, if you allow it, still frames)
+goes to the model.
 
 ![LLM Video Editor Workflow](assets/video_editor_workflow.gif)
 
@@ -32,8 +41,14 @@ and it applies them (`/refine-edit`) and re-renders in one step. More entry poin
 /youtube-shorts make 3 shorts from ~/Videos/raw-tutorial.mp4
 /royalty-free-media add a calm music bed and a funny clip where it fits
 /motion-graphics add a lower third with my name and a title card per chapter
+/color-grade make the clips match and give it a warm travel look
+/voiceover add a few lines of narration where the riding is silent
 /youtube-publish write the title, description and thumbnails for final.mp4
 ```
+
+**Agent mode** (Claude decides everything): open the repo in Claude Code and describe
+the video; the project's `.mcp.json` gives Claude the editing tools. See
+[Agent mode](#agent-mode) for setup and a prompt template.
 
 **From the terminal**, the same in one command:
 
@@ -51,12 +66,13 @@ uv run llmve auto "$HOME/Videos/Bhopal to Khajuraho" -t youtube --target-duratio
     --music-query "acoustic travel" --look warm --match-color -o "$HOME/Movies/bhopal-khajuraho.mp4"
 ```
 
-It builds the story from what you say on camera; long silent riding shots come in
-as cutaways, so mostly silent footage gives a shorter video (see
-[Limitations](#limitations)).
+It builds the story from what you say on camera and fills the rest of the length with
+riding and scenery shots in recording order, so mostly silent travel footage still
+reaches the target (see [Limitations](#limitations)).
 
 `auto` runs every stage, picks pacing, captions, chapters, a ducked licensed music
-bed, a few cutaways where they help and graphics, approves its own review sheet
+bed, a few cutaways where they help, graphics and (with `--look` / `--match-color`)
+colour, approves its own review sheet
 (kept for reference; `--review` stops there instead), renders and writes the
 upload file. Each step prints `done`, `skip` (with the reason) or `fail`;
 optional steps never stop the edit. After editing `edl_raw.json` or running
@@ -74,14 +90,16 @@ builds have all three).
 
 ```bash
 uv sync --extra dev                       # core pipeline + tests
-uv sync --extra dev --extra vision        # + MediaPipe face detection (Linux: apt install libegl1)
+uv sync --extra dev --extra vision --extra agent --extra voice --extra pro   # everything below
 uv run llmve graphics doctor --install    # optional: motion graphics (needs Node.js 22+)
 ```
 
 | Extra | Adds |
 |---|---|
-| `vision` | MediaPipe face detector for take-geometry |
-| `pro` | YOLO person fallback, music ducking (Demucs) |
+| `vision` | MediaPipe face detector for take-geometry (Linux: `apt install libegl1`) |
+| `agent` | the MCP tool server for agent mode |
+| `voice` | local AI narration (Kokoro; the model downloads once, about 330 MB) |
+| `pro` | YOLO object detection (animals, vehicles, people) and person fallback, Demucs |
 | `gen` | generative B-roll fallback (Open-Sora / Stable Video Diffusion) |
 | `graph` | LangGraph orchestration (`llm_video_editor.graph`) with a review interrupt |
 | `anthropic`, `openai` | API planner providers |
@@ -99,7 +117,8 @@ Claude Code > Remote Control).
 ```bash
 brew install ffmpeg uv node          # Node 22+ only for motion graphics
 git clone https://github.com/logsv/llm-video-editor.git && cd llm-video-editor
-uv sync --extra dev --extra vision   # vision = face tracking for vertical crops
+uv sync --extra dev --extra vision --extra agent --extra voice --extra pro
+chflags -R nohidden .venv            # macOS: see Troubleshooting (hidden .pth file)
 uv run llmve graphics doctor --install
 claude                               # Claude Code in this folder, then /edit-video ...
 ```
@@ -113,8 +132,8 @@ claude                               # Claude Code in this folder, then /edit-vi
 
 ## How it works
 
-`watch` → `plan` → `b-roll-select` → `motion-graphics` / `royalty-free-media` →
-`cut-audit` → `take-geometry` → `review-gate` → `render` → `publish`
+`watch` → `plan` → `b-roll-select` → `motion-graphics` / `royalty-free-media` /
+colour → `cut-audit` → `take-geometry` → `review-gate` → `render` → `publish`
 
 Each stage reads the previous stage's JSON checkpoint and writes its own
 under `.llmve/<batch_hash>/`. The batch hash comes from the sorted
@@ -125,26 +144,19 @@ under `.llmve/<batch_hash>/`. The batch hash comes from the sorted
 | watch | `llmve watch <inputs>` | `transcript.json`, `clips_manifest.json`, `sheets/` | word-level faster-whisper (optionally chunked and parallel for long clips); scene/motion scores; clips with no speech tagged as B-roll; 4x4 contact sheets (0.5 FPS overview, 2 FPS on request via `watch-window`) |
 | plan | `llmve plan <ws> -p ...` | `asset_plan.json`, `edl_raw.json` | map/reduce over the whole transcript; the LLM picks **segment ids**, never timestamps; `(retake?)` hints; only text leaves the machine |
 | b-roll-select | `llmve broll index/describe/match` | `broll_select.json` | persistent `broll_index.md` in your B-roll folder, incremental rescans, BM25 + optional LLM re-rank (optional) |
-| motion-graphics | `llmve graphics add/chapters` | `graphics` in `edl_raw.json` | lower thirds, chapter cards, callouts, custom HyperFrames compositions (optional) |
-| royalty-free-media | `llmve media ...`, `llmve music add` | `music`, `overlays` in `edl_raw.json`, `media/` | licensed music/SFX/stock search with credits; voice-over; a few cutaways only where they help (optional) |
-| cut-audit | `llmve media search <ws> "<query>"` | search licensed music/SFX/video -> `media/search.json` | `--kind music\|sfx\|video`, `--provider`, `--limit`, `--length` |
-| `llmve media get <ws> <result_id>` | download a result, record its credit | `--library <dir>` (video) |
-| `llmve media add <ws> <file>` | register a file you have rights to (e.g. YouTube Audio Library) | `--title`, `--license`, `--provider`, `--creator`, `--attribution` |
-| `llmve media place <ws> <clip> --at <clip_id>` | put one cutaway clip at an exact moment | `--offset`, `--duration`, `--src-start`, `--pip` |
-| `llmve media credits <ws>` | list registered media and credit lines | |
-| `llmve media suggest <ws>` | suggest a few cutaway moments (may be none) | `--no-humor`, `--every`, `--brief`, `--provider` |
-| `llmve media fetch <ws>` | download a licensed clip per slot, add overlays | `--library`, `--provider` |
-| `llmve music add <ws> <file> --at <clip_id>` | add music, a sound effect or voice-over to `edl_raw.json` | `--role music\|sfx\|voiceover`, `--offset`, `--duration`, `--volume`, `--no-duck`, `--loop` |
-| `llmve cut-audit <ws>` | `cut_audit.json`, `edl_audited.json` | deterministic: word-edge snapping, sentence completion, per-clip clamping, overlaps (cold opens kept), duration budget, then jump-cut pacing; overlays and graphics re-anchored and kept inside the cut |
+| motion-graphics | `llmve graphics add/chapters` | `graphics` in `edl_raw.json` | lower thirds, chapter cards, callouts, place titles, labels, custom HyperFrames compositions (optional) |
+| royalty-free-media | `llmve media ...`, `llmve music add` | `music`, `overlays` in `edl_raw.json`, `media/` | licensed music/SFX/stock search with credits; voice-over files; a few cutaways only where they help (optional) |
+| colour | `llmve auto --look/--match-color`, agent `set_color`/`set_grade` | `grade`, `clips[].color` in `edl_raw.json` | per-clip matching corrections and one look for the video (optional) |
+| cut-audit | `llmve cut-audit <ws>` | `cut_audit.json`, `edl_audited.json` | deterministic: word-edge snapping, sentence completion, per-clip clamping, overlaps (cold opens kept), duration budget, then jump-cut pacing; overlays, graphics and music re-anchored and kept inside the cut |
 | take-geometry | `llmve geometry <ws>` | `geometry_map.json` | MediaPipe face boxes per used scene; crop centre (zoom-aware), caption band and PiP corner that avoid the face |
-| review-gate | `llmve review <ws>` / `review approve` | `review/sheet_*.png`, `review/review.json` | one composited frame per cut, B-roll overlay and graphic; render refuses until the current cut is approved |
-| render | `llmve render <ws>` | `<out>.mp4`, `<out>.srt`, `<out>.chapters.txt`, `render/qc_report.json` | one encode; every segment normalised to 30 fps, square pixels, cover-crop/letterbox (never stretched), 48 kHz stereo; frame-exact concat; B-roll, then graphics, then captions; music ducked under speech; two-pass `loudnorm=I=-14:TP=-1.5:LRA=11`; chapters embedded; NVENC/VideoToolbox when they actually work |
+| review-gate | `llmve review <ws>` / `review approve` | `review/sheet_*.png`, `review/review.json` | one composited, graded frame per cut, B-roll overlay and graphic; each graphic's contrast, size, safe area and face/caption overlap measured; render refuses until the current cut is approved |
+| render | `llmve render <ws>` | `<out>.mp4`, `<out>.srt`, `<out>.chapters.txt`, `render/qc_report.json` | one encode; every segment normalised to 30 fps, square pixels, cover-crop/letterbox (never stretched), 48 kHz stereo; frame-exact concat; per-clip colour, B-roll, the look, then graphics, then captions; music, SFX and narration levelled to the speech, music ducked under speech and narration; two-pass `loudnorm=I=-14:TP=-1.5:LRA=11` plus a peak limiter; chapters embedded; NVENC/VideoToolbox when they actually work |
 | publish | `llmve publish <ws>` | `<out>.upload.md`, `<out>.upload.json`, `<out>.thumb1-3.jpg` | SEO titles, description (chapters, credits, hashtags), tags, location/date/device from the footage, three thumbnails |
 
 `llmve transcript <ws>` writes a compact `transcript.md` (segment ids, times,
 `(retake?)` markers, long pauses) for reading or planning by hand.
 
-`llmve auto` chains every stage below (plus music, cutaways, graphics and publish)
+`llmve auto` chains every stage (plus music, cutaways, graphics, colour and publish)
 and approves automatically; `llmve finish` re-runs the part from cut-audit on.
 `llmve run` is the older chain that stops at the review sheet unless you pass
 `--approve`. `llmve schema <name>` prints
@@ -289,7 +301,7 @@ uv run llmve cut-audit .llmve/<batch_hash>       # then geometry, review, render
 - Graphics are decoded with `libvpx-vp9`, because ffmpeg's built-in VP9 decoder
   drops the alpha channel and turns the transparent area black.
 
-### Music, sound effects and voice-over
+### Music, sound effects and voice-over files
 Search licensed libraries (commercial use and editing allowed; NC/ND licences are
 filtered out), download with the credit recorded, and place the track:
 
@@ -311,13 +323,15 @@ uv run llmve media add .llmve/<batch_hash> ~/Downloads/track.mp3 --title "Track"
 | Wikimedia Commons | video (CC0, public domain, CC BY, CC BY-SA) | none |
 | YouTube Audio Library / Creator Music | music | no API: download in Studio, register with `media add` |
 
-- Ducking follows speech, not recording level: render measures the speech bus
-  (the clips' own voice plus voice-over tracks), levels the sidechain key to it,
-  and dips music by `mix.duck_depth_db` (default 12 dB) while anyone speaks.
-  Measured: 11-12 dB for both quiet and loud speech.
-- Voice-over tracks play at full level and are never ducked. Sound effects play
-  once at their offset. Music never lengthens the cut, and the final -14 LUFS
-  pass covers the whole mix.
+- Levels follow your voice, not the file: render measures the speech and levels every
+  track to it, so `volume_db` is relative to the voice whatever the track's mastering
+  (music -10, sound effects -4, voice-over 0 by default). `"mix": {"music_level":
+  "file"}` switches back to plain gains.
+- Ducking follows speech: music dips by `mix.duck_depth_db` (default 12 dB) while you
+  or a voice-over speak (measured 11-12 dB for quiet and loud speech alike), and the
+  clips' own sound dips by `mix.clip_duck_db` (6 dB) under narration.
+- Sound effects play once at their offset. Music never lengthens the cut. The final
+  -14 LUFS pass and a peak limiter cover the whole mix (true peak under -1.5 dBTP).
 
 ### Cutaways: B-roll and funny clips, only when needed
 
@@ -355,76 +369,113 @@ uv run llmve publish .llmve/<batch_hash> --brief "budget audio gear for beginner
   to OpenStreetMap for a place name; `--use-location` lets the copy mention it.
   Both are off by default.
 
-### Agent mode (phase 0: tools for an editor agent)
-Agent mode makes Claude the editor: it decides every cut, setting and creative choice,
-and the code only executes, validates and records. Phase 0 provides the tools; a
-one-command agent run comes in a later phase (see
-[docs/agent-mode-plan.md](docs/agent-mode-plan.md)).
+### Place titles, labels and safe text
+- Templates `location` (place name with a map pin) and `label` (points at something in
+  the shot) sit beside `lower-third`, `title-card` and `callout`; every template takes
+  `accent` and `text_color`, and `"auto"` picks either from the shot under it.
+- Review measures every graphic on its shot: text contrast (3:1 minimum for titles), a
+  busy background, a tiny size, the title-safe area (bigger in 9:16, where Shorts
+  buttons and titles sit) and overlap with a face or the caption band, and suggests
+  colours that match or contrast with the shot. These are reports; nothing is moved
+  for you.
+- Place names come from the cameras' GPS (agent `places`), only when you allow it:
+  `llmve profile --set location_lookup=true` sends the stops' rounded coordinates to
+  OpenStreetMap for town, nearest temple or fort, road and nearby named places.
+
+### Colour grading
+- Per clip, corrections only, to make clips match: exposure, contrast, saturation,
+  warmth, tint, and tone mapping for HDR phone clips (`EDLClip.color`).
+- One look for the whole video (`EDL.grade`): `natural`, `warm`, `golden-hour`,
+  `teal-orange`, `cinematic`, `vivid`, `matte` or `bw` at a strength (0.4-0.6 reads
+  premium), or a `.cube` LUT you provide. Footage only: graphics are never graded.
+- Measured, not guessed: the agent's `color_report` gives each clip's exposure, contrast,
+  saturation, colour cast and clipping, how far clips disagree, and gentle suggested
+  corrections (dark clips are not lifted into noise). Audit warns about big pushes,
+  clips that disagree and strong looks.
+- The grade shows in review tiles and thumbnails, and text contrast is measured on the
+  graded picture. No grain or sharpening filters exist on purpose.
+- One command: `llmve auto ... --look warm --look-strength 0.5 --match-color`.
+
+### AI voice-over
+Optional narration for information, a story turn, humour or details the footage can't
+say, never on every video. `uv sync --extra voice` installs a local
+[Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) voice (Apache-2.0; English US/UK,
+Hindi and more); nothing is uploaded. macOS `say` is a fallback.
+- The agent writes the lines; `voiceover` speaks them (with an audition mode that
+  changes nothing), adds them as voice-over tracks and reports each line's length and
+  whether it overlaps your speech, another line or the end.
+- Clean by construction: silence trimmed, 15 ms fades (no clicks), rumble filtered,
+  48 kHz; levelled to your speech; the music ducks under it and the scene dips 6 dB.
+- Numbers and units are spoken out ("380 km" -> "three hundred and eighty
+  kilometres"); `pronounce` sets how names are said (per project or for all projects).
+- Captions and the `.srt` show the line as written; publish adds "Narration:
+  AI-generated voice" to the description and reminds you of YouTube's altered or
+  synthetic content setting. Cloud voices and copies of your own voice are not built
+  yet (see the plan).
+
+## Agent mode
+Claude is the editor: it decides every cut, title, colour, music cue and line of
+narration; the tools execute, validate, measure and record, and never decide
+([docs/agent-mode-plan.md](docs/agent-mode-plan.md) has the plan and what is left).
 
 ```bash
-uv sync --extra agent                       # MCP server dependency
+uv sync --extra dev --extra agent --extra voice --extra pro
 uv run llmve setup                          # what this machine can do
 uv run llmve profile --set channel="Solo Rides" --set languages=en,hi --dislike "film grain"
+uv run llmve profile --set location_lookup=true   # optional: place names from GPS
 uv run llmve tools                          # the agent's tools
-uv run llmve tool open_project '{"inputs": ["~/Videos/trip"], "first": 15}'
+claude                                      # then describe the video
 ```
 
-- Open the repo in Claude Code: the project `.mcp.json` offers the `llmve` tool server,
-  so Claude edits by calling tools (`open_project`, `analyze`, `transcript`, `frames`,
-  `batch`, `trim_clip`, `set_pacing`, `add_item`, `audit`, `review`, `render`, `publish`, ...).
+The project `.mcp.json` starts the tool server (`python -m llm_video_editor mcp`).
+`llmve tool <name> '<json>'` calls the same tools from the terminal.
+
+| Group | Tools |
+|---|---|
+| Project | `open_project` (`first` N clips for quick tests), `analyze` |
+| Look | `overview`, `transcript`, `speech_map`, `frames`, `places`, `objects`, `color_report`, `graphics_templates`, `voices`, `edit_state`, `history`, `profile` |
+| Edit (versioned, each with a reason) | `new_edit`, `add_clip`, `remove_clip`, `trim_clip`, `split_clip`, `move_clip`, `set_clip`, `set_color`, `set_grade`, `set_pacing`, `set_captions`, `set_mix`, `set_output`, `add_item` / `update_item` / `remove_item` (overlays, graphics, music), `voiceover`, `pronounce`, `batch`, `undo`, `remember` |
+| Check and deliver | `audit` (report only), `review`, `render`, `publish`, `media_search`, `media_get`, `job_status` |
+
 - Every edit is a numbered version with the agent's reason (`<ws>/edits/`,
-  `agent_log.jsonl`, `decisions.md`); `undo` restores any earlier version, and hand edits
-  of `edl_raw.json` are recorded rather than overwritten.
-- `audit` reports problems with suggested fixes and changes nothing; the agent decides.
-- `analyze`, `review` and `render` can take many minutes. Over MCP they run as background
-  jobs in their own process: a call answers at once when the work is quick, otherwise it
-  returns a `job_id` and Claude calls `job_status` (up to 55 s per call) until it is done.
-  A crash in a job is reported with its log tail and cannot take the tool server down.
-- `batch` takes each operation's params in the same shape as the standalone tool
-  (`add_item` with a nested `fields` object, or flat).
-- `media_get` downloads any result from any earlier `media_search` in the workspace.
-- On-screen text is the agent's call, and it has the facts for it: `places` gives the
-  route from the cameras' GPS and clock (stops, distances); with your permission
-  (`llmve profile --set location_lookup=true`, which sends the stops' rounded coordinates
-  to OpenStreetMap) it also names each stop (town, nearest temple or fort, road, state)
-  and, with `nearby_km`, lists named temples, forts, forests, national parks, rivers and
-  highways around it. `objects` finds animals, vehicles and people in a clip with a local
-  detector (`uv sync --extra pro`; nothing is uploaded) and says where they are in the
-  frame for a `label` graphic. `review` reports how much of the video has titles, the
-  longest stretch without any, and chapters without a title card.
-- Colour: `color_report` measures each clip (exposure, contrast, saturation, colour
-  cast, clipping) and suggests corrections that make clips match; `set_color` applies
-  them per clip (with `tonemap` for HDR phone clips) and `set_grade` gives the whole
-  video one restrained look (`natural`, `warm`, `golden-hour`, `teal-orange`,
-  `cinematic`, `vivid`, `matte`, `bw`, strength 0-1, or a `.cube` LUT). The grade shows in
-  review tiles and thumbnails, text contrast is measured on it, graphics are never
-  graded, and audit warns about big pushes or clips that disagree. No grain or
-  sharpening filters. One command: `llmve auto ... --look warm --match-color`.
-- AI voice-over (`uv sync --extra voice`): `voiceover` speaks short lines the agent
-  wrote with a local Kokoro voice (English US/UK, Hindi and more; nothing is uploaded;
-  the model downloads once to `~/.cache/llmve/models`), or macOS `say` as a fallback.
-  Lines are cleaned (silence trimmed, no clicks), levelled to your speech, the music
-  ducks under them and the scene's own sound dips by `mix.clip_duck_db` (6 dB). Numbers
-  and units are spoken out; `pronounce` fixes names. Captions use the line text and
-  publish discloses the AI narration. The agent narrates only where a line adds
-  information, story or humour (`voiceover` skill); `audit` reports lines over your
-  speech, overlapping lines and lines past the end.
-- Every graphic is measured on the shot under it at review: contrast of the text against
-  what is behind it (3:1 minimum for titles), a busy background, a tiny size, the
-  title-safe area (bigger in 9:16, where Shorts buttons and titles sit), and overlap with
-  the face or the caption band. Each check also gives the shot's palette and suggested
-  colours (an accent that matches the shot, one that contrasts, the text colour that
-  reads). Every template takes `accent` and `text_color` (the location title also
-  `style: card` for busy or bright shots); `"auto"` for either picks it from the shot.
+  `agent_log.jsonl`, `decisions.md`); `undo` restores any earlier one, and hand edits of
+  `edl_raw.json` are recorded rather than overwritten.
+- `audit` and `review` report (mid-word cuts, words the transcript invented over wind
+  or engine noise, voice-over collisions, colour warnings, graphic contrast and safe
+  areas) and change nothing; the agent decides the fix.
+- `analyze`, `review` and `render` run as background jobs in their own process: a call
+  answers at once when the work is quick, otherwise it returns a `job_id` and Claude
+  polls `job_status`. A crash is reported with its log tail and cannot take the tool
+  server down. Images in replies are shrunk and capped.
+- `batch` takes each operation's params in the same shape as the standalone tool.
 - Renders must go outside the footage folder (`~/Videos/trip - edit/trip.mp4`, not
-  `~/Videos/trip/edit/trip.mp4`), so a later scan of the folder never picks them up.
-  Folder scans also skip `.llmve` workspaces and earlier renders (`<video>.llmve.json`).
-- `first` works on only the first N clips (by name or recording time) for quick tests.
+  `~/Videos/trip/edit/trip.mp4`); folder scans skip `.llmve` workspaces and earlier
+  renders (`<video>.llmve.json`).
 - Footage facts are reported up front: HDR/10-bit, variable or high frame rate,
   rotation, missing or mono audio, action-cam recordings split across files, device,
   time and GPS.
 - Privacy: `stills` (default; frames the agent asks for go to the model) or `text-only`
-  (`llmve profile --set privacy=text-only`). Video files are never uploaded.
+  (`llmve profile --set privacy=text-only`). `privacy` and `location_lookup` are yours to
+  set; the agent cannot change them. Video files are never uploaded.
+
+A prompt template for any video (fill in the `<...>`, delete what doesn't apply):
+
+```text
+Edit <inputs> into a <length> <YouTube 16:9 | Shorts 9:16> video about <topic>, using
+agent mode. Auto-approved: don't stop for review. Save to <output path outside the
+footage folder>.
+- Understand first: open_project, analyze, overview, places, frames/objects; write a shot
+  inventory by category in decisions.md.
+- Balance: <shares per category>; no more than 3 similar shots in a row.
+- Structure: hook in the first 15-20 s, then <order>, then an ending; 4-6 chapters.
+- Cuts on movement and match cuts; location titles at new places; sparse text, never
+  over faces; fix every graphic_checks issue.
+- Colour: color_report, match clips with set_color, one <look> at 0.5 with set_grade.
+- Music: licensed <style>, avoid <...>, ducked under speech. Narration only where it adds
+  information or humour (voiceover).
+- Then audit, review, render, publish; report length, balance, music licence, warnings
+  and anything you could not do.
+```
 
 ## Command reference
 
@@ -447,6 +498,14 @@ Every command has `--help`.
 | `llmve graphics chapters <ws>` | a title card per chapter marker (replaces earlier cards) | `-t`, `--duration`, `--var`, `--no-numbered` |
 | `llmve graphics render <ws>` | pre-render every graphic in `edl_audited.json` (cached) | `--no-draft` |
 | `llmve graphics doctor` | check Node, npm, HyperFrames, libvpx | `--install` |
+| `llmve media search <ws> "<query>"` | search licensed music/SFX/video | `--kind music\|sfx\|video`, `--provider`, `--limit`, `--length` |
+| `llmve media get <ws> <result_id>` | download a result from any earlier search, record its credit | `--library <dir>` (video) |
+| `llmve media add <ws> <file>` | register a file you have rights to (e.g. YouTube Audio Library) | `--title`, `--license`, `--provider`, `--creator`, `--attribution` |
+| `llmve media place <ws> <clip> --at <clip_id>` | put one cutaway clip at an exact moment | `--offset`, `--duration`, `--src-start`, `--pip` |
+| `llmve media credits <ws>` | list registered media and credit lines | |
+| `llmve media suggest <ws>` | suggest a few cutaway moments (may be none) | `--no-humor`, `--every`, `--brief`, `--provider` |
+| `llmve media fetch <ws>` | download a licensed clip per slot, add overlays | `--library`, `--provider` |
+| `llmve music add <ws> <file> --at <clip_id>` | add music, a sound effect or voice-over | `--role music\|sfx\|voiceover`, `--offset`, `--duration`, `--volume` (dB relative to the speech), `--no-duck`, `--loop` |
 | `llmve cut-audit <ws>` | snap, fix, budget, apply pacing, check graphics -> `edl_audited.json` | exits 1 if it fails |
 | `llmve geometry <ws>` | face boxes, crop centres, caption/PiP zones | `--detector auto\|mediapipe\|yolo\|none`, `--samples` |
 | `llmve review <ws>` | build the review sheet (status: pending) | |
@@ -454,7 +513,7 @@ Every command has `--help`.
 | `llmve render <ws>` | one encode, -14 LUFS, QC, SRT, chapters, graphics | `-o out.mp4`, `--encoder auto\|h264_nvenc\|h264_videotoolbox\|libx264`, `--draft`, `--no-captions`, `--skip-review` |
 | `llmve publish <ws>` | upload file, tags, three thumbnails next to the video | `--video`, `--brief`, `--geocode`, `--use-location`, `--no-thumbnails`, `--accent`, `--provider` |
 | `llmve setup` | record this machine's capabilities for the agent | |
-| `llmve profile` | show or update your style profile | `--set key=value`, `--like`, `--dislike`, `--forget` |
+| `llmve profile` | show or update your style profile | `--set key=value` (channel, audience, languages, default_look, privacy, location_lookup, footage_dir, output_dir), `--like`, `--dislike`, `--forget` |
 | `llmve mcp` | serve the agent's tools over MCP (stdio) | `--privacy stills\|text-only` |
 | `llmve mcp-config` | print a `.mcp.json` for Claude Code / `claude -p` | `--privacy` |
 | `llmve tools` / `llmve tool <name> '<json>'` | list the agent's tools / call one | `--privacy`, `--home` |
@@ -472,8 +531,10 @@ which tested `llmve` command to run and how to read its checkpoint.
 | `/refine-edit` | apply your notes to the last render ("shorter", "music too loud", "add my name") |
 | `/youtube-edit` | one long recording -> 16:9 YouTube video with cold open, pacing, chapters and SRT |
 | `/youtube-shorts` | the best 20-60 s moments of a long video -> vertical clips |
-| `/motion-graphics` | lower thirds, chapter cards, callouts, custom HyperFrames compositions |
-| `/royalty-free-media` | music beds, sound effects, voice-over, licensed B-roll and funny cutaways |
+| `/motion-graphics` | lower thirds, chapter cards, callouts, place titles, labels, custom HyperFrames compositions |
+| `/royalty-free-media` | music beds, sound effects, licensed B-roll and funny cutaways |
+| `/color-grade` | make clips match and give the video one restrained look |
+| `/voiceover` | AI narration, only where a line adds information, story or humour |
 | `/youtube-publish` | SEO title, description, tags, location details and three thumbnails |
 | `/watch`, `/cut-audit`, `/take-geometry`, `/b-roll-select`, `/review-gate` | one stage on its own |
 
@@ -533,10 +594,18 @@ The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
 - **Length is capped by the footage**: YouTube cuts from 2 to 50 minutes (or longer)
   work as long as the footage covers them: speech (plus 15% for natural pauses) plus
   the usable length of the clips without speech.
+- **Hard cuts only**: there are no dissolves or crossfades yet; transitions come from
+  how shots are cut (on movement, match cuts) and from title cards.
+- **Narration is local**: Kokoro or macOS voices only; cloud voices and a copy of your
+  own voice are planned, not built.
+- **Speech detection**: the transcript can invent words over wind or engine noise; they
+  are flagged (low confidence, wrong script) and kept out of captions, but a proper
+  voice-activity check is still to come.
 - **One cut per workspace**: make Shorts one after another.
-- **Online media needs network**: music and stock search reach Openverse, Pixabay,
-  Pexels and Wikimedia; YouTube's Audio Library / Creator Music has no API
-  (download there, register with `llmve media add`).
+- **Online services need network**: music and stock search reach Openverse, Pixabay,
+  Pexels and Wikimedia; place names reach OpenStreetMap (only with your permission);
+  YouTube's Audio Library / Creator Music has no API (download there, register with
+  `llmve media add`).
 - **Automatic approval**: `auto` and `finish` approve their own review sheet;
   look at `review/sheet_*.png` and the thumbnails before you upload, or use
   `--review` to stop at the sheet.
@@ -557,13 +626,19 @@ The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
 | Music too loud or too quiet | every track is measured and levelled to your speech, so `volume_db` is relative to the voice (music -10, sfx -4, voice-over 0 by default) whatever the file's mastering; raise or lower it in steps of 2-3 dB. `"mix": {"music_level": "file"}` brings back plain gains |
 | Music barely dips, or dips all the time | it follows speech automatically; set `"mix": {"duck_depth_db": 8-18}` in `edl_raw.json` to change the depth |
 | `publish` warns "no licence/credit recorded" | register the file with `llmve media add` (or remove it from the cut) before uploading |
-| The video is much shorter than the target | most footage has no speech; see [Limitations](#limitations). Narrate over silent clips (`llmve music add ... --role voiceover`) or keep it shorter |
+| The video is much shorter than the target | the footage can't cover it: speech plus the usable length of clips without speech sets the maximum (see [Limitations](#limitations)); keep it shorter or add footage |
 | Claude (cloud session) cannot find my video folder | run on the computer that has the files (see [Run it where your footage is](#run-it-where-your-footage-is-macos-example)) or share the folder through Remote Control |
 | First run is slow before anything happens | the speech model downloads once (about 1.5 GB); long recordings are transcribed in parallel chunks |
 | `llmve` fails with `ModuleNotFoundError: No module named 'llm_video_editor'` (macOS) | macOS marked uv's editable-install `.pth` file hidden, and Python 3.12+ skips hidden `.pth` files. Run `chflags -R nohidden .venv`, or use `uv run python -m llm_video_editor ...` (what `.mcp.json` does) |
 | Claude's MCP call to `review` / `render` ends with "Connection closed" | long tools run as background jobs (`job_status`) and images in a reply are shrunk and capped (oversized replies closed the connection). If it still happens, restart Claude Code (`/mcp` reconnects) and check `<ws>/jobs/*.log`; meanwhile `uv run python -m llm_video_editor tool review '{"workspace": "..."}'` runs the same tool from the terminal |
 | `render` refuses: "inside the footage folder" | save the video beside the footage folder, not inside it (scans of that folder would pick it up as a clip) |
 | A tool says "is not a workspace" or ffmpeg cannot find files with a relative path | workspace paths are now made absolute; pass the path `open_project` returned |
+| Narration: "no voice engine available" | `uv sync --extra voice` (Kokoro); the first line downloads the model to `~/.cache/llmve/models/kokoro` (put `kokoro-v1.0.onnx` and `voices-v1.0.bin` there by hand when offline) |
+| A name is mispronounced in the narration | agent `pronounce` (`{"Khajuraho": "Kha-joo-raa-ho"}`), then run `voiceover` again for those lines |
+| Titles hard to read on a bright sky | set `text_color` to the review's suggested colour (or `"auto"`), use `location` with `style: card`, or move it (`position`) |
+| The grade looks overdone | lower `strength` to 0.4-0.5, or `look: natural`; per-clip corrections should stay within about +/-0.7 EV |
+| `places` names nothing | allow it with `llmve profile --set location_lookup=true`; clips need GPS tags; the nearby search stops after two failed stops (try later, or a smaller `nearby_km`) |
+| `render` QC: true peak above the limit | update: renders now end with a peak limiter (true peak under -1.5 dBTP) |
 | Non-English speech transcribed badly | `--asr-model large-v3-turbo --language <code>` (the default model is English-only) |
 
 ## Programmatic use
@@ -586,7 +661,7 @@ print(final["output"], final["qc_passed"])
 ## Development
 
 ```bash
-uv sync --extra dev --extra vision       # MediaPipe needs libegl1 on Linux
+uv sync --extra dev --extra vision --extra agent --extra voice   # MediaPipe needs libegl1 on Linux
 uv run ruff check .
 uv run pytest                            # or: uv run pytest tests/unit -q
 uv run llmve graphics doctor --install   # optional: enables the real HyperFrames tests
@@ -594,7 +669,9 @@ uv run llmve graphics doctor --install   # optional: enables the real HyperFrame
 
 The integration tests generate synthetic multi-camera media with ffmpeg and
 check A/V sync with flash/beep markers, -14 LUFS output, the review gate,
-graphics alpha compositing, music ducking under voice and voice-over, cutaways
-and the publish package, and the full CLI run. ASR, the LLM, the face detector,
-media APIs and HyperFrames are replaced by fakes; the tests marked `hyperframes`
-run the real CLI and are skipped when the toolchain is not installed.
+graphics alpha compositing, text contrast checks, colour grades (direction and
+strength), music levelled to speech and ducked under voice and narration, the true
+peak limit, voice-over fit and captions, cutaways, the agent tools end to end and the
+publish package. ASR, the LLM, the detectors, TTS, media APIs and HyperFrames are
+replaced by fakes; the tests marked `hyperframes` run the real HyperFrames CLI and the
+Kokoro test runs the real voice when its model files are in the cache.
