@@ -26,6 +26,10 @@ chose this workflow) -> render -> publish, and prints one line per step
 `--no-cutaways`, `--no-humor`, `--pacing natural`, `--captions burn`,
 `--broll-library <dir>`, `--draft` (fast preview), `--review` (stop at the
 sheet instead of approving). Long recordings: it chunks ASR automatically.
+YouTube lengths from 2 to 50 minutes work (`--target-duration 2m` ... `50m`): speech
+comes first and, when it can't fill the length, shots from clips without speech fill
+the rest in recording order (travel footage). If the footage can't cover the target,
+plan says so and the cut comes out shorter.
 
 If a core step fails (watch, plan, cut-audit, render) read the message and
 `<ws>/auto_report.json`; fix the cause (brief, missing tool) and run again: it

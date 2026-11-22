@@ -822,7 +822,8 @@ def agent_setup_cmd() -> None:
 @app.command("profile")
 def agent_profile_cmd(
     set_: list[str] = typer.Option([], "--set", help="key=value (channel, audience, "
-                                   "languages=en,hi, default_look, privacy, footage_dir, output_dir)"),
+                                   "languages=en,hi, default_look, privacy, location_lookup=true, "
+                                   "footage_dir, output_dir)"),
     like: list[str] = typer.Option([], "--like"),
     dislike: list[str] = typer.Option([], "--dislike"),
     forget: list[str] = typer.Option([], "--forget", help="remove a like/dislike"),

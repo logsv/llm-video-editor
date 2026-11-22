@@ -15,7 +15,7 @@
   html, body { margin: 0; background: transparent; }
   #root { position: relative; width: __W__px; height: __H__px; overflow: hidden;
           font-family: "Inter", "Helvetica Neue", Arial, sans-serif; --u: __U__px; }
-  #card { position: absolute; left: calc(var(--u) * 6); bottom: calc(var(--u) * 12);
+  #card { position: absolute; left: max(calc(var(--u) * 6), 6%); bottom: calc(var(--u) * 12);
           display: flex; align-items: stretch; border-radius: calc(var(--u) * 1.2);
           background: rgba(12, 14, 20, 0.88); color: #fff; overflow: hidden;
           box-shadow: 0 calc(var(--u) * 0.6) calc(var(--u) * 2.4) rgba(0, 0, 0, 0.35); }
@@ -23,7 +23,7 @@
   #text { padding: calc(var(--u) * 1.6) calc(var(--u) * 2.6) calc(var(--u) * 1.6) calc(var(--u) * 2.2); }
   #title { font-size: calc(var(--u) * 4.6); font-weight: 700; line-height: 1.1; }
   #subtitle { font-size: calc(var(--u) * 2.7); opacity: 0.82; margin-top: calc(var(--u) * 0.5); }
-  .top-left #card { bottom: auto; top: calc(var(--u) * 8); }
+  .top-left #card { bottom: auto; top: max(calc(var(--u) * 8), 6%); }
   .bottom-center #card { left: 50%; transform: translateX(-50%); }
   /* 9:16: bigger, and above the caption band burned into Shorts/Reels */
   #root.portrait { --u: calc(__U__px * 1.3); }

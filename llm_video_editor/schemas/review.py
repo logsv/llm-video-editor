@@ -23,6 +23,20 @@ class ReviewTile(Strict):
     subject_box_out: BBox | None = None
 
 
+class GraphicCheck(Strict):
+    """How a motion graphic sits on the frame under it (measured, not decided)."""
+
+    graphic_id: str
+    t_out: float
+    bbox: BBox | None = None  # painted area, 0-1 of the frame
+    contrast: float | None = None  # WCAG ratio between the text and what is behind it
+    backdrop: Literal["panel", "video", "none"] = "none"  # its own card, or the shot
+    busy: float | None = None  # luminance spread of the shot behind it (0-0.5)
+    issues: list[str] = Field(default_factory=list)
+    palette: list[str] = Field(default_factory=list)  # the shot's main colours (hex)
+    suggested: dict[str, str] = Field(default_factory=dict)  # match / contrast / text colours
+
+
 class Review(Checkpoint):
     status: Literal["pending", "approved", "rejected"] = "pending"
     edl_hash: str
@@ -30,5 +44,6 @@ class Review(Checkpoint):
     sheets: list[str] = Field(default_factory=list)  # relative to the workspace
     tiles: list[ReviewTile] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    graphic_checks: list[GraphicCheck] = Field(default_factory=list)
     notes: str = ""
     decided_at: str | None = None

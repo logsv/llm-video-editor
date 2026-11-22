@@ -6,7 +6,8 @@
 * Style profile (`~/.config/llmve/profile.json`, or `$LLMVE_CONFIG/profile.json`):
   channel, audience, languages, default look, likes and dislikes learned from the
   user's accepted notes, and the privacy mode. The agent reads it before every edit
-  and appends to it when the user accepts a change ("no film grain").
+  and appends to it when the user accepts a change ("no film grain"). ``privacy`` and
+  ``location_lookup`` are the user's to set; the agent cannot change them.
 """
 
 from __future__ import annotations
@@ -39,6 +40,8 @@ class Profile(Strict):
     likes: list[str] = Field(default_factory=list)
     dislikes: list[str] = Field(default_factory=list)
     privacy: Literal["stills", "text-only"] = "stills"
+    # name places from the clips' GPS via OpenStreetMap (sends rounded coordinates)
+    location_lookup: bool = False
     footage_dir: str = ""
     output_dir: str = ""
     updated_at: str = ""
@@ -70,7 +73,11 @@ def update_profile(*, set_fields: dict | None = None, add_likes: list[str] | Non
     for k, v in (set_fields or {}).items():
         if k not in Profile.model_fields or k in ("likes", "dislikes", "updated_at"):
             raise ValueError(f"cannot set {k!r}; settable: channel, audience, languages, "
-                             "default_look, privacy, footage_dir, output_dir")
+                             "default_look, privacy, location_lookup, footage_dir, output_dir")
+        if Profile.model_fields[k].annotation is bool and isinstance(v, str):
+            if v.lower() not in ("true", "false", "yes", "no", "1", "0", "on", "off"):
+                raise ValueError(f"{k} is true or false, got {v!r}")
+            v = v.lower() in ("true", "yes", "1", "on")
         data[k] = v
     for item in add_likes or []:
         if item not in data["likes"]:

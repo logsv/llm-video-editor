@@ -25,13 +25,19 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
   for the agent: expose parameters and put advice in skills instead.
 - `agent/tools.py`: the tool registry (open_project with `first` N clips, analyze,
   overview, transcript, speech_map, frames, edit_state, history, edit ops, batch, undo,
-  audit (report only), review, render, publish, media, profile, remember). Every edit
+  audit (report only), review, render, publish, media, profile, remember, places,
+  objects, graphics_templates, job_status). `places` names locations only when the user
+  set `location_lookup=true` (coordinates go to OpenStreetMap); the agent cannot set it. Every edit
   tool needs a `reason`; every edit is a version (`agent/edits.py`, `<ws>/edits/`) and is
   logged in `agent_log.jsonl` + `decisions.md`.
 - `agent/mcp_server.py` serves the registry over MCP (`python -m llm_video_editor mcp`,
   project `.mcp.json`); `llmve tool <name> '<json>'` calls one tool from the terminal.
   Over MCP, `analyze`/`review`/`render` run as jobs in their own process
   (`agent/jobs.py`, `<ws>/jobs/`) and return a `job_id` for `job_status` when slow.
+- Graphics are measured on their shot at review (`stages/text_safety.py`,
+  `Review.graphic_checks`): contrast, busy background, size, safe area, face/caption
+  overlap, palette and suggested colours; `accent: "auto"` resolves in
+  `stages/graphics.py`. Reports only: the agent (or user) decides the fix.
 - Renders never go inside a footage folder (`workspace.check_output_path`); folder
   scans skip `.llmve` workspaces and earlier renders (`<video>.llmve.json`).
 - Privacy: `stills` (requested frames/sheets/thumbnails may go to the model) or
@@ -50,6 +56,9 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
 - CLI: `uv run llmve --help`. The entry skill for editing requests is
   `.claude/skills/edit-video/SKILL.md`; `youtube-edit` (long-form 16:9) and
   `youtube-shorts` (vertical clips) specialise it.
+- `plan` fills a target that speech can't reach with shots from clips without speech
+  (`fill_with_footage`, recording order, priority 3 so cut-audit drops them first);
+  YouTube 2-50 min cuts from travel footage depend on it.
 - Long-form options live on the EDL: `pacing` (jump-cut tightening/punch-ins,
   applied in `stages/pacing.py` at the end of cut-audit), `EDLClip.zoom`,
   `EDLClip.chapter` (`stages/chapters.py`), `captions.replacements`.
