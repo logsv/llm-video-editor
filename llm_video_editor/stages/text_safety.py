@@ -47,10 +47,15 @@ def _raw(args: list[str], w: int, channels: int) -> np.ndarray:
 
 
 def frame_rgb(edl: EDL, src: str, t: float, center=None, zoom: float = 1.0,
-              width: int = ANALYSIS_W) -> np.ndarray:
-    """The output frame (fitted and cropped like the render) at analysis size."""
+              width: int = ANALYSIS_W, color=None) -> np.ndarray:
+    """The output frame (fitted, cropped and graded like the render) at analysis size."""
+    from .grade import correction_filter, look_filter
+
     h = round(width * edl.height / edl.width / 2) * 2
-    vf = f"{fit_filter(edl.width, edl.height, edl.fit_mode, center, zoom)},scale={width}:{h},format=rgb24"
+    pre, post = correction_filter(color)
+    vf = ",".join(x for x in (pre, fit_filter(edl.width, edl.height, edl.fit_mode, center, zoom),
+                              post, look_filter(edl.grade), f"scale={width}:{h},format=rgb24")
+                  if x)
     return _raw(["-ss", f"{max(0.0, t):.3f}", "-i", src, "-vf", vf], width, 3)
 
 

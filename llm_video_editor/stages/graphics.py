@@ -71,7 +71,8 @@ def _auto_colours(edl: EDL, g) -> tuple[str, str]:
     clip = next(c for c in edl.clips if c.clip_id == g.anchor_clip_id)
     t = clip.start + min(max(0.0, g.offset) + 0.5, max(0.0, clip.duration - 0.1))
     try:
-        rgb = frame_rgb(edl, clip.source_file, t, clip.crop_center, clip.zoom)
+        rgb = frame_rgb(edl, clip.source_file, t, clip.crop_center, clip.zoom,
+                        color=clip.color)
     except (ValueError, FFmpegError):
         return "#FFC93C", "#FFFFFF"  # the templates' defaults
     return auto_accent(rgb), suggest(rgb)["text"]

@@ -9,6 +9,26 @@ from pydantic import Field, model_validator
 from .base import Checkpoint, Strict
 
 
+class ClipColor(Strict):
+    """Per-clip correction, to make clips match (looks belong on EDL.grade)."""
+
+    exposure: float = Field(0.0, ge=-2.0, le=2.0)  # EV
+    contrast: float = Field(1.0, ge=0.5, le=1.6)
+    saturation: float = Field(1.0, ge=0.0, le=1.8)
+    warmth: float = Field(0.0, ge=-1.0, le=1.0)  # + warmer (red/yellow), - cooler (blue)
+    tint: float = Field(0.0, ge=-1.0, le=1.0)  # + green, - magenta
+    tonemap: bool = False  # HDR (HLG/PQ) clip: tone-map to SDR before the correction
+
+
+class Grade(Strict):
+    """One look for the whole video: a preset at a strength, or a .cube LUT."""
+
+    look: Literal["none", "natural", "warm", "golden-hour", "teal-orange", "cinematic",
+                  "vivid", "matte", "bw"] = "none"
+    strength: float = Field(0.5, ge=0.0, le=1.0)
+    lut: str | None = None  # a .cube file (replaces the preset)
+
+
 class EDLClip(Strict):
     clip_id: str  # unique within the EDL, e.g. "c001"
     source_clip_id: str
@@ -21,6 +41,7 @@ class EDLClip(Strict):
     caption_position: Literal["bottom", "top", "center"] | None = None  # set by take-geometry
     zoom: float = Field(1.0, ge=1.0, le=2.0)  # punch-in on top of the fit (1.0 = none)
     chapter: str | None = None  # a YouTube chapter starts at this clip
+    color: ClipColor | None = None  # per-clip correction
     notes: str = ""
 
     @property
@@ -150,6 +171,7 @@ class EDL(Checkpoint):
     clips: list[EDLClip] = Field(default_factory=list)
     overlays: list[Overlay] = Field(default_factory=list)
     captions: CaptionSettings = Field(default_factory=CaptionSettings)
+    grade: Grade = Field(default_factory=Grade)  # one look for the whole video
     pacing: Pacing = Field(default_factory=Pacing)
     graphics: list[Graphic] = Field(default_factory=list)
     music: list[MusicTrack] = Field(default_factory=list)

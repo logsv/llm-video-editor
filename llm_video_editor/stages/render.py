@@ -31,6 +31,7 @@ from ..ffmpeg.graph import (
     MusicSpec,
     OverlaySpec,
     Segment,
+    add_filter,
     add_graphics,
     add_music,
     add_overlays,
@@ -54,6 +55,7 @@ from ..schemas import EDL, ClipsManifest, RenderQC, Transcript
 from ..workspace import Workspace, check_output_path
 from .captions import write_captions, write_srt
 from .chapters import chapter_marks, chapter_warnings, description_block, ffmetadata
+from .grade import correction_filter, look_filter
 
 MAX_INPUTS = 24
 
@@ -73,8 +75,9 @@ def timeline(edl: EDL, manifest: ClipsManifest) -> tuple[list[Segment], list[flo
             raise ValueError(f"{clip.clip_id}: source {clip.source_clip_id} not in manifest")
         start = snap_to_frame(clip.start, info.fps)
         dur = quantize(clip.end - start, edl.fps)
+        pre, post = correction_filter(clip.color)
         segs.append(Segment(info.source_file, round(start, 6), dur, info.has_audio,
-                            clip.crop_center, clip.zoom))
+                            clip.crop_center, clip.zoom, pre, post))
         starts.append(round(t, 6))
         t += dur
     return segs, starts
@@ -292,6 +295,7 @@ def render(ws: Workspace, edl: EDL | None = None, *, out: Path | None = None,
     g, v, a, _ = _base_graph(segs, edl, work, max_inputs, workers, mezz=mezz)
     base = add_overlays(g, v, overlay_specs(edl, starts, manifest), width=edl.width,
                         height=edl.height, fps=edl.fps, mode=edl.fit_mode)
+    base = add_filter(g, base, look_filter(edl.grade), "graded")  # footage only, not graphics
     base = add_graphics(g, base, gfx, width=edl.width, height=edl.height, fps=edl.fps)
     a = add_music(g, a, tracks, total=expected, ducking=ducking)
     ass = None

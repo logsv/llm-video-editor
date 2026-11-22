@@ -15,8 +15,10 @@ from pydantic import ValidationError
 from ..schemas import (
     EDL,
     CaptionSettings,
+    ClipColor,
     ClipsManifest,
     EDLClip,
+    Grade,
     Graphic,
     MixSettings,
     MusicTrack,
@@ -173,6 +175,21 @@ def set_captions(edl: EDL, manifest: ClipsManifest, **fields: Any) -> EDL:
 
 def set_mix(edl: EDL, manifest: ClipsManifest, **fields: Any) -> EDL:
     return edl.model_copy(update={"mix": _merge(MixSettings, edl.mix, fields)})
+
+
+def set_grade(edl: EDL, manifest: ClipsManifest, **fields: Any) -> EDL:
+    """One look for the whole video: look, strength, lut."""
+    return edl.model_copy(update={"grade": _merge(Grade, edl.grade, fields)})
+
+
+def set_color(edl: EDL, manifest: ClipsManifest, *, clip_id: str, **fields: Any) -> EDL:
+    """Per-clip correction (merged into the clip's current one); no fields resets it."""
+    i = _find(edl, clip_id)
+    clip = edl.clips[i]
+    color = None if not fields else _merge(ClipColor, clip.color or ClipColor(), fields)
+    clips = list(edl.clips)
+    clips[i] = clip.model_copy(update={"color": color})
+    return edl.model_copy(update={"clips": clips})
 
 
 def set_output(edl: EDL, manifest: ClipsManifest, *, target_duration: float | None = None,

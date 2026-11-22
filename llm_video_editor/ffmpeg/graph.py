@@ -24,6 +24,8 @@ class Segment:
     has_audio: bool
     crop_center: tuple[float, float] | None = None
     zoom: float = 1.0  # punch-in on top of the cover crop
+    color_pre: str = ""  # before the fit (HDR tone mapping)
+    color_post: str = ""  # after the fit (per-clip correction)
 
 
 @dataclass(frozen=True)
@@ -132,9 +134,11 @@ def fit_filter(width: int, height: int, mode: FitMode = "cover",
             f"crop={width}:{height}:{x}:{y}")
 
 
-def _video_chain(idx: int, dur: float, fps: int, fit: str, label: str, shift: float = 0.0) -> str:
+def _video_chain(idx: int, dur: float, fps: int, fit: str, label: str, shift: float = 0.0,
+                 pre: str = "", post: str = "") -> str:
     pad = 2 / fps
     tail = f"setpts=PTS-STARTPTS+{shift:.6f}/TB" if shift else "setpts=PTS-STARTPTS"
+    fit = ",".join(x for x in (pre, fit, post) if x)
     return (f"[{idx}:v:0]setpts=PTS-STARTPTS,fps={fps},{fit},setsar=1,format=yuv420p,"
             f"tpad=stop_mode=clone:stop_duration={pad:.6f},trim=duration={dur:.6f},{tail}[{label}]")
 
@@ -151,7 +155,8 @@ def add_segments(g: Graph, segments: list[Segment], *, width: int, height: int, 
         if not audio_only:
             g.filters.append(_video_chain(idx, seg.duration, fps,
                                           fit_filter(width, height, mode, seg.crop_center,
-                                                     seg.zoom), v))
+                                                     seg.zoom), v,
+                                          pre=seg.color_pre, post=seg.color_post))
         if seg.has_audio:
             g.filters.append(
                 f"[{idx}:a:0]asetpts=PTS-STARTPTS,aresample=48000,{AUDIO_FMT},"
@@ -167,6 +172,14 @@ def add_segments(g: Graph, segments: list[Segment], *, width: int, height: int, 
     g.filters.append("".join(f"[{v}][{a}]" for v, a in pairs)
                      + f"concat=n={n}:v=1:a=1[{prefix}vcat][{prefix}acat]")
     return f"{prefix}vcat", f"{prefix}acat"
+
+
+def add_filter(g: Graph, base: str, chain: str, label: str) -> str:
+    """Apply a filter chain to a video stream ("" keeps it as is)."""
+    if not chain:
+        return base
+    g.filters.append(f"[{base}]{chain}[{label}]")
+    return label
 
 
 def add_overlays(g: Graph, base: str, overlays: list[OverlaySpec], *, width: int, height: int,

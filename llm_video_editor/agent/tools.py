@@ -595,6 +595,61 @@ def set_mix(ctx: Context, p: FieldsP) -> dict:
     return _edit(p, ops.set_mix, p.fields, "set_mix")
 
 
+@tool("set_grade", "edit", FieldsP)
+def set_grade(ctx: Context, p: FieldsP) -> dict:
+    """One look for the whole video: look (none, natural, warm, golden-hour, teal-orange,
+    cinematic, vivid, matte, bw), strength 0-1 (0.4-0.6 reads premium), or lut (a .cube
+    file). Applied to the footage only, never to graphics."""
+    return _edit(p, ops.set_grade, p.fields, "set_grade")
+
+
+class ColorP(EditP):
+    clip_id: str
+    fields: dict[str, Any] = Field(default_factory=dict, description="exposure (EV), "
+                                   "contrast, saturation, warmth, tint, tonemap (HDR); "
+                                   "{} resets the clip")
+
+
+@tool("set_color", "edit", ColorP)
+def set_color(ctx: Context, p: ColorP) -> dict:
+    """Per-clip correction so clips match each other (use color_report's suggestions);
+    looks belong on set_grade."""
+    return _edit(p, ops.set_color, {"clip_id": p.clip_id, **p.fields}, "set_color")
+
+
+class ColorReportP(WsP):
+    samples: int = Field(3, ge=1, le=8, description="frames measured per clip")
+
+
+@tool("color_report", "look", ColorReportP)
+def color_report(ctx: Context, p: ColorReportP) -> dict:
+    """Measure every clip of the current edit (exposure, contrast, saturation, colour
+    cast, clipping), how consistent they are, suggested per-clip corrections towards
+    the median clip, HDR clips that need tone mapping, and warnings about the current
+    grade. Measures the ungraded source."""
+    import statistics
+
+    from ..stages.grade import color_warnings, measure_clip, suggest_matches
+
+    ws = _ws(p.workspace)
+    edl = EditStore(ws).current()
+    facts = {Path(k).resolve(): v for k, v in _footage(ws).items()}
+    measured, hdr = {}, []
+    for c in edl.clips:
+        measured[c.clip_id] = measure_clip(c.source_file, c.start, c.end, p.samples)
+        f = facts.get(Path(c.source_file).resolve(), {})
+        if f.get("hdr") and not (c.color and c.color.tonemap):
+            hdr.append(c.clip_id)
+    sug = suggest_matches(measured)
+    spread = {k: round(statistics.pstdev([m[k] for m in measured.values()]), 3)
+              for k in ("mid", "saturation", "warm")} if len(measured) > 1 else {}
+    return {"clips": [{"clip_id": cid, **m, **sug[cid]} for cid, m in measured.items()],
+            "spread": spread, "hdr_needs_tonemap": hdr,
+            "grade": edl.grade.model_dump(), "warnings": color_warnings(edl),
+            "note": "mid ~0.35-0.5 is a normal exposure; spread above ~0.08 (mid) or 0.06 "
+                    "(warm) shows as clips not matching"}
+
+
 class OutputP(EditP):
     target_duration: float | None = None
     clear_target: bool = False
@@ -652,7 +707,8 @@ _BATCHABLE = {"add_clip": ops.add_clip, "remove_clip": ops.remove_clip,
               "set_pacing": ops.set_pacing, "set_captions": ops.set_captions,
               "set_mix": ops.set_mix, "set_output": ops.set_output,
               "add_item": ops.add_item, "update_item": ops.update_item,
-              "remove_item": ops.remove_item}
+              "remove_item": ops.remove_item, "set_grade": ops.set_grade,
+              "set_color": ops.set_color}
 
 
 # per-call keys of the standalone tools that a batch sets once for all its operations
@@ -739,11 +795,15 @@ def audit_tool(ctx: Context, p: WsP) -> dict:
     _, rep = _agent_audit(ws, write=False)
     EditStore(ws).note("check", "audit", {}, "", f"{len(rep.violations)} findings, "
                        f"{'ok' if rep.passed else 'blocking errors'}")
+    from ..stages.grade import color_warnings
+
     vo = _vo_report(EditStore(ws).current(), ws)
+    colour = color_warnings(EditStore(ws).current())
     return {"passed": rep.passed, "duration_after_pacing": rep.duration_after,
             "pauses_removed": rep.pauses_removed,
             "findings": [v.model_dump(exclude_none=True) for v in rep.violations],
-            "voiceover": [r for r in vo if r["issues"]] or "no voice-over issues"}
+            "voiceover": [r for r in vo if r["issues"]] or "no voice-over issues",
+            "color": colour or "no colour issues"}
 
 
 class ReviewP(WsP):

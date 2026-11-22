@@ -325,7 +325,7 @@ Remaining: V2 (cloud engines behind a user `tts` setting, a copy of the user's o
 - Clock-offset correction between cameras; near-duplicate detection; proxies and sampled analysis for many hours of footage; disk-space checks.
 
 ### 11.4 P2 Craft (rest)
-- Colour: per-clip correction from measurements, matching across cameras, looks (curves, LUT), HDR/log to SDR tone mapping.
+- Colour: done (`color_report`, `set_color`, `set_grade`, looks and LUT, HDR tone mapping, matching suggestions, warnings, `auto --look --match-color`). Remaining: log-profile (drone) conversion, skin-tone protection, and a LUT strength (blend) option.
 - Speed (slow motion from 60/120 fps, ramps) and stabilisation.
 - Audio cleanup: wind and engine noise reduction, EQ, levels.
 - Blur tool for strangers' faces and number plates.

@@ -28,7 +28,8 @@ INSTRUCTIONS = (
     "chapter cards and callouts are graphics (graphics_templates lists them; a "
     "`location` template exists for place titles), and review reports what text the "
     "video has. Narration is optional: voiceover adds short lines you wrote, only where "
-    "they add information, story or humour. analyze, review and render can take "
+    "they add information, story or humour. Colour: color_report, then set_color to "
+    "match clips and set_grade for one restrained look. analyze, review and render can take "
     "minutes: when they return a job_id, call job_status until it is done."
 )
 

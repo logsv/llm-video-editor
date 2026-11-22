@@ -10,7 +10,7 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
   (audit -> review -> render -> publish, no re-transcription or re-planning).
 - Skill routing: any edit request -> `edit-video`; one long recording for YouTube ->
   `youtube-edit`; clips/Shorts -> `youtube-shorts`; reactions to a render -> `refine-edit`;
-  music/SFX/B-roll/funny clips -> `royalty-free-media`; AI narration -> `voiceover`; titles, thumbnails,
+  music/SFX/B-roll/funny clips -> `royalty-free-media`; AI narration -> `voiceover`; colour, looks, matching cameras -> `color-grade`; titles, thumbnails,
   description -> `youtube-publish`; titles/lower thirds/cards -> `motion-graphics`.
   Single-stage skills (`watch`, `cut-audit`, `take-geometry`, `review-gate`,
   `b-roll-select`) are for debugging one stage.
@@ -26,7 +26,8 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
 - `agent/tools.py`: the tool registry (open_project with `first` N clips, analyze,
   overview, transcript, speech_map, frames, edit_state, history, edit ops, batch, undo,
   audit (report only), review, render, publish, media, profile, remember, places,
-  objects, graphics_templates, job_status, voices, voiceover, pronounce). `places` names locations only when the user
+  objects, graphics_templates, job_status, voices, voiceover, pronounce,
+  color_report, set_color, set_grade). `places` names locations only when the user
   set `location_lookup=true` (coordinates go to OpenStreetMap); the agent cannot set it. Every edit
   tool needs a `reason`; every edit is a version (`agent/edits.py`, `<ws>/edits/`) and is
   logged in `agent_log.jsonl` + `decisions.md`.
@@ -43,6 +44,11 @@ Prompt-driven video editor: raw clips in, platform-ready cuts out (YouTube
   are `MusicTrack(role="voiceover", text=..., generator=...)`; the clips' own sound
   dips under them (`mix.clip_duck_db`), captions use the text, publish discloses AI
   narration. Narrate only where it helps (advice in the `voiceover` skill).
+- Colour: `stages/grade.py` (measure, match suggestions, `correction_filter` per clip
+  from `EDLClip.color`, `look_filter` from `EDL.grade`: one restrained look per video or
+  a .cube LUT). Applied in render (look after overlays, before graphics), review tiles,
+  the text-safety frames and thumbnails. No grain/sharpen filters on purpose. Note:
+  ffmpeg's `colorbalance` does nothing to midtones; warmth uses `colortemperature`.
 - Renders never go inside a footage folder (`workspace.check_output_path`); folder
   scans skip `.llmve` workspaces and earlier renders (`<video>.llmve.json`).
 - Privacy: `stills` (requested frames/sheets/thumbnails may go to the model) or

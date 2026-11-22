@@ -691,6 +691,11 @@ def auto_cmd(
     cutaways: bool = typer.Option(True, help="Add a few licensed B-roll/funny clips where they help"),
     humor: bool = typer.Option(True, help="Allow funny cutaways"),
     graphics: bool = typer.Option(True, help="Chapter cards / lower third (needs Node 22+)"),
+    look: str = typer.Option("none", help="One colour look: none | natural | warm | golden-hour "
+                             "| teal-orange | cinematic | vivid | matte | bw"),
+    look_strength: float = typer.Option(0.5, min=0.0, max=1.0, help="0.4-0.6 reads premium"),
+    match_color: bool = typer.Option(False, help="Correct clips towards each other (exposure, "
+                                     "white balance, saturation) so they look like one video"),
     name: str | None = typer.Option(None, help='Lower third, e.g. "Jane Doe|Founder"'),
     broll_library: Path | None = typer.Option(None, help="Your own B-roll folder to use first"),
     review: bool = typer.Option(False, "--review", help="Stop at the review sheet instead of auto-approving"),
@@ -719,6 +724,7 @@ def auto_cmd(
         target=target, target_duration=parse_duration(target_duration) if target_duration else None,
         out=out, pacing=pacing, captions=captions, chapters=chapters, music=music,
         music_query=music_query, cutaways=cutaways, humor=humor, graphics=graphics, name=name,
+        look=look, look_strength=look_strength, match_color=match_color,
         broll_library=broll_library, approve=not review, publish=publish, geocode=geocode,
         use_location=use_location, draft=draft, encoder=encoder, detector=detector,
         asr_model=asr_model, language=language, chunk_asr_over=chunk_asr_over or None)

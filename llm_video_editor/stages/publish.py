@@ -307,6 +307,7 @@ def make_thumbnails(edl: EDL, transcript: Transcript, starts: list[float], ideas
         target = video.with_name(f"{video.stem}.thumb{n}.jpg")
         frame = pick_frame(clip.source_file, a, max(b, a + 0.2),
                            video.with_name(f".{video.stem}.frame{n}.jpg"))
+        frame = _graded(frame, edl, clip)
         text = re.sub(r"\s+", " ", clean(idea.text)).strip()[:40] or "Watch this"
         used = render_thumbnail(frame, text, style, target, width=edl.width, height=edl.height,
                                 accent=accent, prefer_hyperframes=prefer_hyperframes)
@@ -316,6 +317,21 @@ def make_thumbnails(edl: EDL, transcript: Transcript, starts: list[float], ideas
                              renderer=used))
     if len(out) < 3:
         warnings.append(f"only {len(out)} thumbnail(s) could be made")
+    return out
+
+
+def _graded(frame: Path, edl: EDL, clip) -> Path:
+    """The thumbnail frame with the clip's correction and the video's look."""
+    from ..ffmpeg.runner import ffmpeg
+    from .grade import correction_filter, look_filter
+
+    pre, post = correction_filter(clip.color)
+    chain = ",".join(x for x in (pre, post, look_filter(edl.grade)) if x)
+    if not chain:
+        return frame
+    out = frame.with_name(frame.stem + ".graded.jpg")
+    ffmpeg("-i", str(frame), "-vf", chain, "-q:v", "2", str(out), timeout=60)
+    frame.unlink(missing_ok=True)
     return out
 
 

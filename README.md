@@ -48,7 +48,7 @@ Example, a 10-minute travel vlog with Hindi narration:
 uv run llmve auto "$HOME/Videos/Bhopal to Khajuraho" -t youtube --target-duration 10m \
     -p "solo bike trip vlog, Bhopal to Khajuraho: the ride, roadside stops, the temples" \
     --asr-model large-v3-turbo --language hi --name "Your Name|Solo rider" \
-    --music-query "acoustic travel" -o "$HOME/Movies/bhopal-khajuraho.mp4"
+    --music-query "acoustic travel" --look warm --match-color -o "$HOME/Movies/bhopal-khajuraho.mp4"
 ```
 
 It builds the story from what you say on camera; long silent riding shots come in
@@ -392,6 +392,14 @@ uv run llmve tool open_project '{"inputs": ["~/Videos/trip"], "first": 15}'
   detector (`uv sync --extra pro`; nothing is uploaded) and says where they are in the
   frame for a `label` graphic. `review` reports how much of the video has titles, the
   longest stretch without any, and chapters without a title card.
+- Colour: `color_report` measures each clip (exposure, contrast, saturation, colour
+  cast, clipping) and suggests corrections that make clips match; `set_color` applies
+  them per clip (with `tonemap` for HDR phone clips) and `set_grade` gives the whole
+  video one restrained look (`natural`, `warm`, `golden-hour`, `teal-orange`,
+  `cinematic`, `vivid`, `matte`, `bw`, strength 0-1, or a `.cube` LUT). The grade shows in
+  review tiles and thumbnails, text contrast is measured on it, graphics are never
+  graded, and audit warns about big pushes or clips that disagree. No grain or
+  sharpening filters. One command: `llmve auto ... --look warm --match-color`.
 - AI voice-over (`uv sync --extra voice`): `voiceover` speaks short lines the agent
   wrote with a local Kokoro voice (English US/UK, Hindi and more; nothing is uploaded;
   the model downloads once to `~/.cache/llmve/models`), or macOS `say` as a fallback.
@@ -425,7 +433,7 @@ Every command has `--help`.
 
 | Command | What it does | Useful options |
 |---|---|---|
-| `llmve auto <inputs...> -p "<brief>"` | the whole edit in one command, auto-approved, plus upload file | `-t`, `--target-duration`, `-o`, `--name "Name\|Role"`, `--music auto\|off\|<file>`, `--music-query`, `--no-cutaways`, `--no-humor`, `--no-graphics`, `--pacing`, `--captions`, `--broll-library`, `--review`, `--draft` |
+| `llmve auto <inputs...> -p "<brief>"` | the whole edit in one command, auto-approved, plus upload file | `-t`, `--target-duration`, `-o`, `--name "Name\|Role"`, `--music auto\|off\|<file>`, `--music-query`, `--no-cutaways`, `--no-humor`, `--no-graphics`, `--pacing`, `--captions`, `--broll-library`, `--look`, `--look-strength`, `--match-color`, `--review`, `--draft` |
 | `llmve finish <ws>` | after a change: cut-audit -> geometry -> review (approved) -> render -> publish | `-o`, `--review`, `--no-publish`, `--draft` |
 | `llmve watch <inputs...>` | transcribe, score scenes, classify A-roll/B-roll, overview sheets | `--asr-model` (default `distil-large-v3`, English), `--language`, `--chunk-asr-over <min>`, `--asr-workers`, `--home` |
 | `llmve watch-window <ws> <clip_id> <start> <end>` | dense contact sheets for one window | `--fps` (default 2) |
