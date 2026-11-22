@@ -68,7 +68,35 @@ def search(query: str, kind: MediaKind, *, providers: tuple[str, ...] | None = N
     res = MediaSearch(query=query, kind=kind, results=results, errors=errors)
     if ws is not None:
         Workspace.write(media_dir(ws) / "search.json", res)
+        _remember_results(ws, res)
     return res
+
+
+SEARCH_HISTORY = 500  # results kept across searches
+
+
+def _remember_results(ws: Workspace, res: MediaSearch) -> None:
+    """Keep every result seen in this workspace (newest wins), not only the last search,
+    so an agent can search for several tracks and then download any of them."""
+    p = media_dir(ws) / "search_results.json"
+    seen = Workspace.read(p, MediaSearch).results if p.exists() else []
+    ids = {r.result_id for r in res.results}
+    keep = [r for r in seen if r.result_id not in ids] + list(res.results)
+    Workspace.write(p, MediaSearch(query="(all searches)", kind=res.kind,
+                                   results=keep[-SEARCH_HISTORY:], errors=[]))
+
+
+def find_result(ws: Workspace, result_id: str) -> MediaResult:
+    """A result from any earlier search in this workspace."""
+    pools = [media_dir(ws) / "search_results.json", media_dir(ws) / "search.json"]
+    for p in pools:
+        if p.exists():
+            hit = next((r for r in Workspace.read(p, MediaSearch).results
+                        if r.result_id == result_id), None)
+            if hit is not None:
+                return hit
+    raise KeyError(f"{result_id} was not returned by any media_search in this workspace; "
+                   "search again and use a result_id from the results")
 
 
 def last_search(ws: Workspace) -> MediaSearch:

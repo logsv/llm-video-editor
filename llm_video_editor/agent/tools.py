@@ -23,8 +23,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..schemas import EDL, ClipsManifest, Transcript
-from ..workspace import Workspace
-from . import ops
+from ..workspace import Workspace, check_output_path
+from . import jobs, ops
 from .edits import EditConflict, EditError, EditStore
 from .footage import group_recordings, inspect, select_inputs
 
@@ -37,6 +37,10 @@ class P(BaseModel):
 
 class WsP(P):
     workspace: str = Field(description="workspace directory returned by open_project")
+
+
+class NoArgsP(P):
+    workspace: str | None = Field(None, description="not needed")
 
 
 class EditP(WsP):
@@ -52,7 +56,12 @@ class Context:
     privacy: Privacy = "stills"
     home: Path | None = None
     transcriber_factory: Callable[[str], Any] | None = None
+    object_detector_factory: Callable[..., Any] | None = None  # tests inject a fake
     images_out: list[str] = field(default_factory=list)  # images the last call returned
+    # long tools (analyze, review, render): "off" runs them in the call (terminal use);
+    # "process"/"thread" run them as background jobs polled with job_status (MCP)
+    jobs: Literal["off", "thread", "process"] = "off"
+    job_wait: float = 20.0  # seconds a long call waits before returning a job id
 
 
 @dataclass(frozen=True)
@@ -91,6 +100,11 @@ def call(name: str, args: dict[str, Any], ctx: Context | None = None) -> dict:
         return {"error": f"bad arguments for {name}: {err['msg']} at "
                          f"{'.'.join(map(str, err['loc'])) or '(root)'}"}
     try:
+        if ctx.jobs != "off" and name in jobs.LONG_TOOLS:
+            ws = _ws(params.workspace)  # type: ignore[attr-defined]
+            job = jobs.start(name, params.model_dump(mode="json"), ctx, ws.root, ctx.job_wait)
+            ctx.images_out = job.get("images", []) if job["status"] == "done" else []
+            return jobs.summary(job)
         return t.run(ctx, params)
     except (EditError, EditConflict, ValueError, FileNotFoundError, KeyError) as e:
         return {"error": str(e).strip("'\"")}
@@ -315,6 +329,131 @@ def history(ctx: Context, p: HistoryP) -> dict:
     return {"entries": EditStore(_ws(p.workspace)).history(p.limit, p.kind)}
 
 
+class PlacesP(WsP):
+    lookup: bool = Field(False, description="name each stop (town, nearest temple/fort/"
+                         "landmark, road, state) via OpenStreetMap; only if the user allowed "
+                         "location_lookup in their profile")
+    stop_radius_km: float = Field(1.0, gt=0, le=50,
+                                  description="clips this close together form one stop")
+    nearby_km: float = Field(0, ge=0, le=5, description="with lookup: also list named "
+                             "temples, forts, forests, parks, rivers and highways within this "
+                             "radius of each stop (0 = off)")
+
+
+@tool("places", "look", PlacesP)
+def places_tool(ctx: Context, p: PlacesP) -> dict:
+    """Where and when each clip was filmed: the route in recording order from the
+    cameras' GPS and clock, distances, and stops (clips filmed close together). With
+    lookup, each stop gets place names for titles; without, coordinates only."""
+    from .places import name_stops, nearby_stops, route
+    from .setup import load_profile
+
+    ws = _ws(p.workspace)
+    ids = {}
+    if ws.clips_manifest.exists():
+        ids = {str(Path(c.source_file).resolve()): c.clip_id for c in _manifest(ws).clips}
+    res = route(_footage(ws), ids, stop_radius_km=p.stop_radius_km)
+    if not res["clips_with_gps"]:
+        res["note"] = ("no clip has GPS: ask the user where the footage was filmed, or read "
+                       "the place from signs in frames and the transcript")
+        return res
+    if p.lookup:
+        if not load_profile().location_lookup:
+            res["note"] = ("place names need the user's permission (coordinates go to "
+                           "OpenStreetMap): they can run `llmve profile --set "
+                           "location_lookup=true`; meanwhile ask them or use the transcript")
+        else:
+            res["stops"], res["errors"] = name_stops(res["stops"], ws.root / "places.json")
+            if p.nearby_km:
+                res["stops"], errs = nearby_stops(res["stops"], ws.root / "places_nearby.json",
+                                                  radius_km=p.nearby_km)
+                res["errors"] += errs
+            EditStore(ws).note("check", "places", {"lookup": True}, "",
+                               f"named {sum('place' in s for s in res['stops'])} stops")
+    for s in res["stops"]:
+        s.pop("key", None)
+    return res
+
+
+class ObjectsP(WsP):
+    clip_id: str = Field(description="source clip id (from analyze/overview)")
+    start: float = Field(0, ge=0)
+    end: float | None = Field(None, description="default: end of clip (max 600 s window)")
+    every: float = Field(2.0, ge=0.25, le=30, description="seconds between sampled frames")
+    min_confidence: float = Field(0.35, ge=0.05, le=0.95)
+    labels: list[str] | None = Field(None, description="only these, e.g. [\"cow\", \"dog\"]")
+
+
+@tool("objects", "look", ObjectsP)
+def objects_tool(ctx: Context, p: ObjectsP) -> dict:
+    """Everyday objects in a clip, detected locally (nothing is uploaded): animals (cow,
+    dog, horse, bird, elephant, ...), vehicles, people and other COCO classes, with when
+    they are visible and where in the frame (x, y of the box centre, 0-1, for a label
+    graphic). Temples, forests and scenery are not classes: look at frames for those."""
+    from ..stages.geometry import grab_frame
+
+    ws = _ws(p.workspace)
+    clip = _manifest(ws).get(p.clip_id)
+    if clip is None:
+        raise KeyError(f"no source clip {p.clip_id!r}: see overview")
+    end = min(p.end if p.end is not None else clip.duration, clip.duration)
+    if end - p.start > 600:
+        raise ValueError("window too long (max 600 s): look at shorter windows")
+    factory = ctx.object_detector_factory
+    if factory is None:
+        try:
+            from ..stages.detectors import YoloObjectDetector
+        except ImportError as e:  # pragma: no cover - import is lazy inside
+            raise ValueError(str(e)) from e
+        factory = YoloObjectDetector
+    try:
+        det = factory(min_confidence=p.min_confidence)
+    except ImportError as e:
+        raise ValueError("object detection needs ultralytics: `uv sync --extra pro` "
+                         f"({e})") from e
+    want = {x.lower() for x in p.labels} if p.labels else None
+    seen: dict[str, dict] = {}
+    t, frames = p.start, 0
+    try:
+        while t < end - 0.04:  # a frame exactly at the end does not decode
+            frames += 1
+            for label, box, score in det.detect(grab_frame(clip.source_file, t)):
+                if want and label.lower() not in want:
+                    continue
+                area = (box[2] - box[0]) * (box[3] - box[1])
+                s = seen.setdefault(label, {"label": label, "frames": 0, "first": t,
+                                            "last": t, "best": None})
+                s["frames"] += 1
+                s["last"] = t
+                if s["best"] is None or score * (0.5 + area) > s["best"]["rank"]:
+                    s["best"] = {"t": round(t, 2), "score": round(score, 2),
+                                 "x": round((box[0] + box[2]) / 2, 3),
+                                 "y": round((box[1] + box[3]) / 2, 3),
+                                 "box": [round(v, 3) for v in box],
+                                 "rank": score * (0.5 + area)}
+            t += p.every
+    finally:
+        det.close()
+    found = sorted(seen.values(), key=lambda s: -s["frames"])
+    for s in found:
+        s["best"].pop("rank")
+        s["first"], s["last"] = round(s["first"], 2), round(s["last"], 2)
+    return {"clip_id": p.clip_id, "frames_checked": frames, "objects": found,
+            "note": "x, y are in the source frame; a label graphic stays put, so use it "
+                    "while the object holds still or for a short time"}
+
+
+@tool("graphics_templates", "look", NoArgsP)
+def graphics_templates(ctx: Context, p: NoArgsP) -> dict:
+    """Built-in motion graphics (for add_item kind=graphics, `template`) and their
+    variables. A custom HyperFrames project folder can be used as `composition`."""
+    from ..hyperframes.compose import templates
+
+    return {"templates": [{"name": t.name, "description": t.description,
+                           "variables": {v["id"]: v.get("default") for v in t.variables}}
+                          for t in templates().values()]}
+
+
 # =============================================================================== edit
 def _edit(p: EditP, op: Callable[..., EDL], params: dict, name: str,
           need_manifest: bool = True) -> dict:
@@ -512,9 +651,31 @@ _BATCHABLE = {"add_clip": ops.add_clip, "remove_clip": ops.remove_clip,
               "remove_item": ops.remove_item}
 
 
+# per-call keys of the standalone tools that a batch sets once for all its operations
+_BATCH_LEVEL = ("workspace", "reason", "expected_version")
+
+
+def _op_params(op: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Accept an operation's params in the same shape as the standalone tool: tools that
+    take a nested ``fields`` dict (set_clip, set_pacing, add_item, ...) may pass it nested
+    or flat. Per-call keys (workspace, reason) are ignored: the batch carries them."""
+    out = {k: v for k, v in params.items() if k not in _BATCH_LEVEL}
+    nested = out.pop("fields", None)
+    if nested is not None:
+        if not isinstance(nested, dict):
+            raise EditError(f"{op}: `fields` must be an object")
+        clash = sorted(set(nested) & set(out))
+        if clash:
+            raise EditError(f"{op}: {', '.join(clash)} given both inside and outside `fields`")
+        out.update(nested)
+    return out
+
+
 class Op(P):
     op: str = Field(description=f"one of {', '.join(_BATCHABLE)}")
-    params: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(
+        default_factory=dict, description="the same arguments as the standalone tool "
+        "(nested `fields` or flat both work); workspace and reason come from the batch")
 
 
 class BatchP(EditP):
@@ -533,7 +694,7 @@ def batch(ctx: Context, p: BatchP) -> dict:
             if fn is None:
                 raise EditError(f"operation {n}: unknown op {o.op!r}")
             try:
-                edl = fn(edl, manifest, **o.params)
+                edl = fn(edl, manifest, **_op_params(o.op, o.params))
             except TypeError as e:
                 raise EditError(f"operation {n} ({o.op}): {e}") from e
             except EditError as e:
@@ -586,7 +747,10 @@ class ReviewP(WsP):
 @tool("review", "check", ReviewP)
 def review(ctx: Context, p: ReviewP) -> dict:
     """Prepare the edit for render (pacing applied, guardrails only), find faces for
-    crops/captions, and build the review sheet (one frame per cut, overlay, graphic)."""
+    crops/captions, and build the review sheet (one frame per cut, overlay, graphic).
+    Each graphic is measured on its shot: contrast, busy background, size, safe area,
+    face/caption overlap, the shot's palette and suggested colours (accent "auto" uses
+    them)."""
     from ..stages.detectors import get_detector
     from ..stages.geometry import run_geometry
     from ..stages.review import build_review
@@ -605,14 +769,49 @@ def review(ctx: Context, p: ReviewP) -> dict:
     sheets = [str(ws.root / s) for s in rv.sheets]
     if ctx.privacy == "stills":
         ctx.images_out = sheets
+    text = _on_screen_text(Workspace.read(ws.edl_audited, EDL))  # as it will render
     EditStore(ws).note("check", "review", {}, "", f"{len(rv.tiles)} tiles, "
-                       f"{len(rv.warnings)} warnings")
+                       f"{len(rv.warnings)} warnings, {text['graphics']} graphics")
     return {"sheets": sheets, "warnings": rv.warnings, "tiles": len(rv.tiles),
-            "duration": rep.duration_after}
+            "duration": rep.duration_after, "on_screen_text": text,
+            "graphic_checks": [c.model_dump(exclude_none=True) for c in rv.graphic_checks]}
+
+
+def _on_screen_text(edl: EDL) -> dict:
+    """Facts about titles and text in the edit (a report; the agent decides)."""
+    starts = dict(zip((c.clip_id for c in edl.clips), edl.output_starts(), strict=True))
+    spans = sorted((starts[g.anchor_clip_id] + g.offset,
+                    starts[g.anchor_clip_id] + g.offset + g.duration)
+                   for g in edl.graphics if g.anchor_clip_id in starts)
+    total = edl.total_duration
+    gaps, t = [], 0.0
+    for a, b in spans:
+        if a > t:
+            gaps.append((t, a))
+        t = max(t, b)
+    if total > t:
+        gaps.append((t, total))
+    longest = max(gaps, key=lambda g: g[1] - g[0], default=(0.0, 0.0))
+    chapters = [(c.chapter, starts[c.clip_id]) for c in edl.clips if c.chapter]
+    untitled = [name for name, at in chapters
+                if not any(a - 1.0 <= at <= b for a, b in spans)]
+    out = {"graphics": len(spans),
+           "templates": sorted({g.template or "custom" for g in edl.graphics}),
+           "seconds_with_graphics": round(sum(b - a for a, b in spans), 1),
+           "longest_without_graphics": {"from": round(longest[0], 1),
+                                        "to": round(longest[1], 1),
+                                        "seconds": round(longest[1] - longest[0], 1)},
+           "captions": edl.captions.enabled,
+           "chapters_without_a_title_graphic": untitled}
+    if not spans:
+        out["note"] = ("no titles or text graphics in the video. Place names, chapter "
+                       "cards and callouts are add_item kind=graphics (see "
+                       "graphics_templates; `places` tells where clips were filmed)")
+    return out
 
 
 class RenderP(WsP):
-    out: str = Field(description="output .mp4 path")
+    out: str = Field(description="output .mp4 path, outside the footage folder")
     reason: str = Field(min_length=3, description="why the edit is ready (your approval)")
     draft: bool = Field(False, description="fast low-quality encode for checking")
     encoder: str = "auto"
@@ -626,11 +825,11 @@ def render_tool(ctx: Context, p: RenderP) -> dict:
     from ..stages.review import ReviewRequired, decide
 
     ws = _ws(p.workspace)
+    out = Path(p.out).expanduser().resolve()
+    check_output_path(out, ws.sources)  # before approving: nothing changes on refusal
     if not (ws.review_dir / "review.json").exists():
         raise ValueError("no review yet: call review first")
     decide(ws, True, f"approved by the editor agent: {p.reason}")
-    out = Path(p.out).expanduser()
-    out.parent.mkdir(parents=True, exist_ok=True)
     try:
         res = render(ws, out=out, encoder=p.encoder, quality="draft" if p.draft else "high",
                      require_review=True)
@@ -708,13 +907,11 @@ class MediaGetP(WsP):
 def media_get(ctx: Context, p: MediaGetP) -> dict:
     """Download a search result (credit recorded). Video is registered as a source clip
     so it can be used with add_clip or as an overlay."""
-    from ..media.library import fetch, last_search
+    from ..media.library import fetch, find_result
     from ..stages.cutaways import _register
 
     ws = _ws(p.workspace)
-    hit = next((r for r in last_search(ws).results if r.result_id == p.result_id), None)
-    if hit is None:
-        raise KeyError(f"{p.result_id} is not in the last media_search")
+    hit = find_result(ws, p.result_id)  # any earlier search, not only the last
     path = fetch(ws, hit, library=Path(p.library) if p.library else None)
     out = {"file": str(path), "license": hit.license, "credit": hit.attribution}
     if hit.kind == "video":
@@ -723,6 +920,23 @@ def media_get(ctx: Context, p: MediaGetP) -> dict:
         Workspace.write(ws.clips_manifest, manifest)
         out["source_clip_id"] = info.clip_id
     return out
+
+
+class JobStatusP(WsP):
+    job_id: str
+    wait_seconds: float = Field(30, ge=0, le=jobs.MAX_WAIT,
+                                description="wait up to this long for the job to finish")
+
+
+@tool("job_status", "check", JobStatusP)
+def job_status(ctx: Context, p: JobStatusP) -> dict:
+    """Progress or result of a long tool (analyze, review, render) that returned a
+    job_id. Waits up to wait_seconds; returns the tool's result once it is done."""
+    ws = _ws(p.workspace)
+    job = jobs.wait_for(ws.root, p.job_id, p.wait_seconds)
+    if job["status"] == "done" and ctx.privacy == "stills":
+        ctx.images_out = job.get("images", [])
+    return jobs.summary(job)
 
 
 # =============================================================================== profile
@@ -756,11 +970,13 @@ class RememberP(P):
 @tool("remember", "edit", RememberP)
 def remember(ctx: Context, p: RememberP) -> dict:
     """Update the style profile from a note the user accepted (e.g. dislike: film grain).
-    Privacy cannot be changed from here."""
+    Privacy and location lookup cannot be changed from here."""
     from .setup import update_profile
 
-    if "privacy" in p.set_fields:
-        raise ValueError("privacy is the user's setting: change it with `llmve profile set`")
+    for k in ("privacy", "location_lookup"):
+        if k in p.set_fields:
+            raise ValueError(f"{k} is the user's setting: they change it with "
+                             f"`llmve profile --set {k}=...`")
     prof = update_profile(set_fields=p.set_fields, add_likes=p.add_likes,
                           add_dislikes=p.add_dislikes, remove=p.remove)
     return {"profile": prof.model_dump()}

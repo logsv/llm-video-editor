@@ -12,7 +12,7 @@ from .manifest import ClipInfo, ClipsManifest, SceneCut
 from .media import Credit, Credits, MediaResult, MediaSearch
 from .publish import SourceMeta, Thumbnail, UploadPackage
 from .render import RenderQC
-from .review import Review, ReviewTile
+from .review import GraphicCheck, Review, ReviewTile
 from .sheets import Sheet, SheetIndex, Tile
 from .transcript import ClipTranscript, Segment, Transcript, Word
 
@@ -65,6 +65,7 @@ __all__ = [
     "Pacing",
     "PlannedSegment",
     "RenderQC",
+    "GraphicCheck",
     "Review",
     "ReviewTile",
     "SceneCut",

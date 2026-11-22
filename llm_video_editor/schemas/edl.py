@@ -45,7 +45,7 @@ class Graphic(Strict):
     """A HyperFrames motion graphic (rendered to transparent WebM) over the edit."""
 
     graphic_id: str
-    template: str | None = None  # built-in: lower-third, title-card, callout
+    template: str | None = None  # built-in: lower-third, title-card, callout, location, label
     composition: str | None = None  # or a HyperFrames project folder (has index.html)
     variables: dict[str, str | float | bool] = Field(default_factory=dict)
     anchor_clip_id: str  # EDLClip.clip_id the graphic starts on

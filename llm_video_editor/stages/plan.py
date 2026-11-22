@@ -274,7 +274,8 @@ def build_edl(plan: AssetPlan, manifest: ClipsManifest) -> EDL:
     width, height = map(int, spec["resolution"].split("x"))
     clips = [
         EDLClip(clip_id=f"c{i + 1:03d}", source_clip_id=s.clip_id, source_file=s.source_file,
-                start=s.start, end=s.end, priority=s.priority, notes=s.purpose)
+                start=s.start, end=s.end, priority=s.priority, notes=s.purpose,
+                role="broll" if s.purpose in ("footage", "montage") else "a_roll")
         for i, s in enumerate(plan.segments)
     ]
     overlays = []
@@ -296,16 +297,100 @@ def build_edl(plan: AssetPlan, manifest: ClipsManifest) -> EDL:
 SPEECH_AIR = 1.15  # cut-audit keeps lead/tail air around every sentence
 
 
-def choose_target(prompt: str, platform: str, explicit: float | None, available: float) -> float:
+def choose_target(prompt: str, platform: str, explicit: float | None, available: float,
+                  footage: float = 0.0) -> float:
     """Requested length, capped by the platform and by what the footage can fill.
 
     ``available`` is pure speech time; a cut that keeps all of it is ~15% longer
     once sentences get their lead/tail air, so the cap allows for that instead of
-    making cut-audit drop clips from a "use everything" edit.
+    making cut-audit drop clips from a "use everything" edit. ``footage`` is the
+    usable length of clips without speech (riding, scenery), which can fill the rest.
     """
     spec = get_platform_specs(platform)
     target = explicit or duration_from_prompt(prompt) or float(spec["typical_duration"])
-    return round(min(target, float(spec["max_duration"]), available * SPEECH_AIR), 3)
+    return round(min(target, float(spec["max_duration"]), available * SPEECH_AIR + footage), 3)
+
+
+FILL_MIN, FILL_MAX = 2.5, 12.0  # seconds per footage shot
+FILL_PRIORITY = 3  # dropped first when the cut runs over its budget
+EDGE = 0.25  # skip the first/last moments of a clip (camera shake on start/stop)
+
+
+def silent_footage(manifest: ClipsManifest) -> list[ClipInfo]:
+    return [c for c in manifest.clips if c.kind != "talking_head" and c.duration > FILL_MIN + 2 * EDGE]
+
+
+def _windows(clip: ClipInfo, quota: float) -> list[tuple[float, float]]:
+    """Up to ``quota`` seconds of shots from the clip, in recording order: the quota is
+    shared across its scenes (water-filling), and a long share becomes several shots
+    spread through the scene rather than one long take."""
+    lo, hi = EDGE, clip.duration - EDGE
+    scenes = [(max(lo, sc.start), min(hi, sc.end)) for sc in clip.scenes] or [(lo, hi)]
+    scenes = [sc for sc in scenes if sc[1] - sc[0] >= FILL_MIN]
+    alloc = {i: 0.0 for i in range(len(scenes))}
+    left, open_ = quota, set(alloc)
+    while left > 0.01 and open_:
+        share = left / len(open_)
+        for i in sorted(open_):
+            room = scenes[i][1] - scenes[i][0] - alloc[i]
+            take = min(share, room)
+            alloc[i] += take
+            left -= take
+            if room - take < 0.01:
+                open_.discard(i)
+    out = []
+    for i, (a, b) in enumerate(scenes):
+        total = alloc[i]
+        if total < FILL_MIN:
+            continue
+        k = max(1, int(-(-total // FILL_MAX)))  # shots of at most FILL_MAX seconds
+        length, span = total / k, b - a
+        gap = (span - total) / k  # spread evenly, centred in equal slices
+        for j in range(k):
+            st = a + j * (length + gap) + gap / 2
+            out.append((round(st, 3), round(min(b, st + length), 3)))
+    return sorted(out)
+
+
+def fill_with_footage(plan: AssetPlan, manifest: ClipsManifest, target: float) -> AssetPlan:
+    """When speech can't fill the target, add shots from clips without speech, placed
+    in recording order between the spoken segments (a travel video: talk, ride, talk)."""
+    pool = silent_footage(manifest)
+    budget = target - sum(sg.duration for sg in plan.segments)
+    if budget < FILL_MIN or not pool:
+        return plan
+    usable = {c.clip_id: c.duration - 2 * EDGE for c in pool}
+    total = sum(usable.values())
+    order = {c.clip_id: i for i, c in enumerate(manifest.clips)}
+    groups = []
+    for c in pool:
+        quota = usable[c.clip_id] if total <= budget else budget * usable[c.clip_id] / total
+        segs = [PlannedSegment(clip_id=c.clip_id, source_file=c.source_file, start=a, end=b,
+                               purpose="footage", priority=FILL_PRIORITY)
+                for a, b in _windows(c, quota)]
+        if segs:
+            groups.append((order[c.clip_id], segs))
+    groups.sort(key=lambda g: g[0])
+    speech = list(plan.segments)
+    new: list[PlannedSegment] = []
+    remap: dict[int, int] = {}
+    for i, sg in enumerate(speech):
+        k = order.get(sg.clip_id, 0)
+        hook = i == 0 and len(speech) > 1 and k > order.get(speech[1].clip_id, 0)
+        while groups and groups[0][0] < k and not hook:
+            new += groups.pop(0)[1]
+        remap[i] = len(new)
+        new.append(sg)
+    for _, segs in groups:
+        new += segs
+    added = sum(sg.duration for sg in new) - sum(sg.duration for sg in speech)
+    broll = [b.model_copy(update={"over_segment": remap[b.over_segment]})
+             for b in plan.broll if b.over_segment in remap]
+    n_clips = len({sg.clip_id for sg in new} - {sg.clip_id for sg in speech})
+    note = (f"filled {added:.0f}s with shots from {n_clips} clips without speech "
+            "(dropped first if over budget)")
+    return plan.model_copy(update={"segments": new, "broll": broll,
+                                   "notes": "; ".join(x for x in (plan.notes, note) if x)})
 
 
 def plan(ws: Workspace, prompt: str, provider: Provider, *, target_platform: str = "youtube",
@@ -314,8 +399,10 @@ def plan(ws: Workspace, prompt: str, provider: Provider, *, target_platform: str
     transcript = Workspace.read(ws.transcript, Transcript)
     talking = [transcript.for_clip(c.clip_id) for c in manifest.clips if c.kind == "talking_head"]
     talking = [t for t in talking if t is not None and t.segments]
-    available = sum(s.end - s.start for t in talking for s in t.segments) or manifest.total_duration
-    target = choose_target(prompt, target_platform, target_duration, available)
+    speech = sum(s.end - s.start for t in talking for s in t.segments)
+    footage = sum(c.duration - 2 * EDGE for c in silent_footage(manifest)) if talking else 0.0
+    available = speech or manifest.total_duration
+    target = choose_target(prompt, target_platform, target_duration, available, footage)
 
     if not talking:
         asset_plan = montage_plan(manifest, prompt, target_platform, target)
@@ -332,6 +419,7 @@ def plan(ws: Workspace, prompt: str, provider: Provider, *, target_platform: str
         asset_plan = resolve(result, transcript, manifest, prompt, target_platform, target)
         if not asset_plan.segments:
             raise RuntimeError(f"Planner returned no usable selections: {asset_plan.notes}")
+        asset_plan = fill_with_footage(asset_plan, manifest, target)
 
     edl = build_edl(asset_plan, manifest)
     Workspace.write(ws.asset_plan, asset_plan)

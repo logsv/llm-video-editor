@@ -103,6 +103,33 @@ class YoloPersonDetector:
         pass
 
 
+class YoloObjectDetector:
+    """Everyday objects (COCO's 80 classes: animals such as cow, dog, horse, bird,
+    elephant; vehicles; people; ...) with YOLO, locally. Needs the `pro` extra."""
+
+    name = "yolo-objects"
+
+    def __init__(self, model: str = "yolo11n.pt", min_confidence: float = 0.35):
+        from ultralytics import YOLO
+
+        self._model = YOLO(model)
+        self.min_confidence = min_confidence
+
+    def detect(self, rgb: np.ndarray) -> list[Box]:
+        h, w = rgb.shape[:2]
+        res = self._model.predict(rgb[:, :, ::-1], verbose=False, conf=self.min_confidence)
+        out: list[Box] = []
+        for r in res:
+            for (x1, y1, x2, y2), c, k in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist(),
+                                              r.boxes.cls.tolist(), strict=True):
+                out.append((str(r.names[int(k)]), (_clip01(x1 / w), _clip01(y1 / h),
+                                                   _clip01(x2 / w), _clip01(y2 / h)), float(c)))
+        return out
+
+    def close(self) -> None:
+        pass
+
+
 class NullDetector:
     name = "none"
 

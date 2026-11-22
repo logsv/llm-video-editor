@@ -254,7 +254,7 @@ them after `plan` and before `cut-audit`:
 
 ```bash
 uv run llmve graphics doctor --install           # once: Node 22+, pinned HyperFrames + GSAP
-uv run llmve graphics templates                  # lower-third, title-card, callout + variables
+uv run llmve graphics templates                  # lower-third, title-card, callout, location, label
 uv run llmve graphics add .llmve/<batch_hash> --at c003 -t lower-third --offset 0.5 \
     --duration 4 --var title="Jane Doe" --var subtitle="Founder"
 uv run llmve graphics chapters .llmve/<batch_hash>    # a title card per chapter
@@ -267,6 +267,8 @@ uv run llmve cut-audit .llmve/<batch_hash>       # then geometry, review, render
 | `lower-third` | `title`, `subtitle`, `accent`, `position` (bottom-left, top-left, bottom-center) | in 9:16 it moves above the caption band |
 | `title-card` | `title`, `kicker`, `accent`, `dim` (0-1) | full-frame card over a dimmed shot; `graphics chapters` fills `title` and "Chapter N" |
 | `callout` | `text`, `accent`, `position` (top, center) | one short phrase that pops in |
+| `location` | `title`, `subtitle`, `accent`, `position` (top-left, bottom-left, top-right, center) | place title with a map pin: town, temple, road ("Khajuraho", "Madhya Pradesh · 380 km") |
+| `label` | `text`, `detail`, `x`, `y` (0-1), `accent` | points at something in the shot (a cow, the temple, the highway); stays put, so use it on a steady shot |
 
 - Graphics are `EDL.graphics` entries anchored to a clip (like B-roll overlays):
   `--at` is a clip id from `edl_raw.json`, `--offset` is seconds into that clip,
@@ -374,6 +376,31 @@ uv run llmve tool open_project '{"inputs": ["~/Videos/trip"], "first": 15}'
   `agent_log.jsonl`, `decisions.md`); `undo` restores any earlier version, and hand edits
   of `edl_raw.json` are recorded rather than overwritten.
 - `audit` reports problems with suggested fixes and changes nothing; the agent decides.
+- `analyze`, `review` and `render` can take many minutes. Over MCP they run as background
+  jobs in their own process: a call answers at once when the work is quick, otherwise it
+  returns a `job_id` and Claude calls `job_status` (up to 55 s per call) until it is done.
+  A crash in a job is reported with its log tail and cannot take the tool server down.
+- `batch` takes each operation's params in the same shape as the standalone tool
+  (`add_item` with a nested `fields` object, or flat).
+- `media_get` downloads any result from any earlier `media_search` in the workspace.
+- On-screen text is the agent's call, and it has the facts for it: `places` gives the
+  route from the cameras' GPS and clock (stops, distances); with your permission
+  (`llmve profile --set location_lookup=true`, which sends the stops' rounded coordinates
+  to OpenStreetMap) it also names each stop (town, nearest temple or fort, road, state)
+  and, with `nearby_km`, lists named temples, forts, forests, national parks, rivers and
+  highways around it. `objects` finds animals, vehicles and people in a clip with a local
+  detector (`uv sync --extra pro`; nothing is uploaded) and says where they are in the
+  frame for a `label` graphic. `review` reports how much of the video has titles, the
+  longest stretch without any, and chapters without a title card.
+- Every graphic is measured on the shot under it at review: contrast of the text against
+  what is behind it (3:1 minimum for titles), a busy background, a tiny size, the
+  title-safe area (bigger in 9:16, where Shorts buttons and titles sit), and overlap with
+  the face or the caption band. Each check also gives the shot's palette and suggested
+  colours (an accent that matches the shot, one that contrasts, the text colour that
+  reads). `"accent": "auto"` in a graphic's variables picks the colour from its shot.
+- Renders must go outside the footage folder (`~/Videos/trip - edit/trip.mp4`, not
+  `~/Videos/trip/edit/trip.mp4`), so a later scan of the folder never picks them up.
+  Folder scans also skip `.llmve` workspaces and earlier renders (`<video>.llmve.json`).
 - `first` works on only the first N clips (by name or recording time) for quick tests.
 - Footage facts are reported up front: HDR/10-bit, variable or high frame rate,
   rotation, missing or mono audio, action-cam recordings split across files, device,
@@ -464,24 +491,29 @@ Everything for one batch of inputs lives in `.llmve/<batch_hash>/` (set
 | `cut_audit.json`, `edl_audited.json` | cut-audit | what was fixed, and the cut that renders |
 | `geometry_map.json` | geometry | face boxes, crop centres, caption positions |
 | `graphics/*.webm` | review / render | cached HyperFrames renders |
-| `media/credits.json`, `media/search.json`, `media/cutaways.json` | media | licences and credit lines, last search, cutaway slots |
+| `media/credits.json`, `media/search.json`, `media/search_results.json`, `media/cutaways.json` | media | licences and credit lines, last search, every result seen, cutaway slots |
 | `media/*.mp3`, `media/broll/*` (+ `.json` sidecars) | media get / fetch | downloaded music, SFX and stock clips |
 | `review/sheet_*.png`, `review/review.json` | review | the preview and its approval state |
 | `render/qc_report.json` | render | QC: duration, A/V offset, loudness, chapter warnings |
 | `manifest.json` | every stage | per stage: cache key, outputs, completion time |
+| `places.json`, `places_nearby.json` | agent `places` with lookup | cached place names and nearby named features per stop |
+| `jobs/<job_id>.json`, `.log` | agent tools over MCP | background jobs (analyze, review, render): status, result, log |
+| `<video>.llmve.json` (next to the render) | render | marks the file as an llmve render (folder scans skip it) |
 
 The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
 `broll_index.md`, `.llmve_broll/`).
 
 ## Limitations
 
-- **The cut follows speech.** The planner builds the main timeline from what is
-  said in talking-head clips. Clips without speech (riding footage, scenery) are
-  used only as cutaways the planner places over speech; if *no* clip has speech it
-  makes a montage instead. So a mostly silent travel video comes out shorter than
-  the target, and `cut-audit` reports it as under the duration budget.
-- **Length is capped by the footage**: the target can't exceed the speech
-  available (plus 15% for natural pauses).
+- **Speech first, then footage.** The planner builds the story from what is said in
+  talking-head clips. When speech can't fill the target (a travel video with a few
+  pieces to camera and hours of riding), `plan` fills the rest with shots from the
+  clips without speech, in recording order between the spoken parts (talk, ride, talk),
+  several shorter shots spread through long takes; these are dropped first if the cut
+  runs long. If *no* clip has speech it makes a montage.
+- **Length is capped by the footage**: YouTube cuts from 2 to 50 minutes (or longer)
+  work as long as the footage covers them: speech (plus 15% for natural pauses) plus
+  the usable length of the clips without speech.
 - **One cut per workspace**: make Shorts one after another.
 - **Online media needs network**: music and stock search reach Openverse, Pixabay,
   Pexels and Wikimedia; YouTube's Audio Library / Creator Music has no API
@@ -508,6 +540,10 @@ The B-roll index lives in the library folder itself (`.llmve_broll_index.json`,
 | The video is much shorter than the target | most footage has no speech; see [Limitations](#limitations). Narrate over silent clips (`llmve music add ... --role voiceover`) or keep it shorter |
 | Claude (cloud session) cannot find my video folder | run on the computer that has the files (see [Run it where your footage is](#run-it-where-your-footage-is-macos-example)) or share the folder through Remote Control |
 | First run is slow before anything happens | the speech model downloads once (about 1.5 GB); long recordings are transcribed in parallel chunks |
+| `llmve` fails with `ModuleNotFoundError: No module named 'llm_video_editor'` (macOS) | macOS marked uv's editable-install `.pth` file hidden, and Python 3.12+ skips hidden `.pth` files. Run `chflags -R nohidden .venv`, or use `uv run python -m llm_video_editor ...` (what `.mcp.json` does) |
+| Claude's MCP call to `review` / `render` ends with "Connection closed" | update to a version with background jobs (`job_status`); the work continues in its own process. Check `<ws>/jobs/*.log`; meanwhile `uv run llmve tool review '{"workspace": "..."}'` runs it from the terminal |
+| `render` refuses: "inside the footage folder" | save the video beside the footage folder, not inside it (scans of that folder would pick it up as a clip) |
+| A tool says "is not a workspace" or ffmpeg cannot find files with a relative path | workspace paths are now made absolute; pass the path `open_project` returned |
 | Non-English speech transcribed badly | `--asr-model large-v3-turbo --language <code>` (the default model is English-only) |
 
 ## Programmatic use

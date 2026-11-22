@@ -61,6 +61,19 @@ def chapter_cards(ws: Workspace, *, template: str = "title-card", duration: floa
     return cards
 
 
+def _auto_accent(edl: EDL, g) -> str:
+    """Accent for ``accent: "auto"``: matches the anchor shot, or contrasts with it."""
+    from ..ffmpeg.runner import FFmpegError
+    from .text_safety import auto_accent, frame_rgb
+
+    clip = next(c for c in edl.clips if c.clip_id == g.anchor_clip_id)
+    t = clip.start + min(max(0.0, g.offset) + 0.5, max(0.0, clip.duration - 0.1))
+    try:
+        return auto_accent(frame_rgb(edl, clip.source_file, t, clip.crop_center, clip.zoom))
+    except (ValueError, FFmpegError):
+        return "#FFC93C"  # the templates' default yellow
+
+
 def graphic_specs(ws: Workspace, edl: EDL, starts: list[float], *, quality: str = "standard"
                   ) -> list[GraphicSpec]:
     """Render (or reuse) every graphic and place it on the output timeline."""
@@ -81,8 +94,11 @@ def graphic_specs(ws: Workspace, edl: EDL, starts: list[float], *, quality: str 
         else:
             w = max(2, round(g.box[2] * edl.width) // 2 * 2)
             h = max(2, round(g.box[3] * edl.height) // 2 * 2)
+        variables = dict(g.variables)
+        if variables.get("accent") == "auto":  # a colour taken from the shot it sits on
+            variables["accent"] = _auto_accent(edl, g)
         path = render_graphic(out_dir, template=g.template, composition=g.composition,
-                              variables=g.variables, width=w, height=h, duration=dur,
+                              variables=variables, width=w, height=h, duration=dur,
                               fps=edl.fps, quality=quality)
         specs.append(GraphicSpec(str(path), quantize(by_id[g.anchor_clip_id] + g.offset, edl.fps),
                                  dur, g.box))

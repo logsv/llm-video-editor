@@ -13,6 +13,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -35,6 +36,45 @@ def is_media(path: Path) -> bool:
     return path.suffix.lower() in MEDIA_EXTENSIONS
 
 
+OUTPUT_SIDECARS = (".llmve.json", ".upload.md", ".upload.json", ".chapters.txt")
+
+
+def is_llmve_output(path: Path, scanned: Path | None = None) -> bool:
+    """True for files llmve produced: anything in a ``.llmve`` workspace below the
+    folder being scanned, and renders (recognised by the sidecars render/publish write
+    next to them). Folder scans skip these so a render saved near the footage is never
+    ingested as a new clip. Scanning a folder inside a workspace (its B-roll library)
+    still works: only ``.llmve`` folders below ``scanned`` count."""
+    below = path.relative_to(scanned).parts if scanned and path.is_relative_to(scanned) \
+        else path.parts
+    if ".llmve" in below[:-1]:
+        return True
+    return any(path.with_suffix(ext).exists() for ext in OUTPUT_SIDECARS)
+
+
+def footage_dirs(sources: Sequence[Path]) -> list[Path]:
+    """Folders holding the footage: each clip's folder, plus their common folder when
+    that is a project folder (not the home directory or above)."""
+    dirs = {Path(s).resolve().parent for s in sources}
+    if len(dirs) > 1:
+        common = Path(os.path.commonpath([str(d) for d in dirs]))
+        home = Path.home().resolve()
+        if common != home and common not in home.parents and common.parent != common:
+            dirs.add(common)
+    return sorted(dirs)
+
+
+def check_output_path(out: Path, sources: Sequence[Path]) -> None:
+    """Refuse an output inside a footage folder: folder scans would ingest the render."""
+    out = Path(out).expanduser().resolve()
+    for d in footage_dirs(sources):
+        if out.parent == d or d in out.parents:
+            raise ValueError(
+                f"output {out} is inside the footage folder {d}; save renders elsewhere "
+                f"(e.g. {d.parent / (d.name + ' - edit') / out.name}) so they are never "
+                "picked up as new clips")
+
+
 def resolve_inputs(spec: str | os.PathLike[str] | Sequence[str | os.PathLike[str]]) -> list[Path]:
     """Resolve a file, a directory (recursive) or a glob into sorted media paths."""
     specs: Iterable[str | os.PathLike[str]] = (
@@ -48,10 +88,13 @@ def resolve_inputs(spec: str | os.PathLike[str] | Sequence[str | os.PathLike[str
                 raise ValueError(f"Not a supported video file: {p}")
             found.add(p.resolve())
         elif p.is_dir():
-            found.update(q.resolve() for q in p.rglob("*") if q.is_file() and is_media(q))
+            found.update(q.resolve() for q in p.rglob("*")
+                         if q.is_file() and is_media(q) and not is_llmve_output(q, p))
         else:
             matches = [Path(m) for m in glob.glob(str(p), recursive=True)]
-            found.update(m.resolve() for m in matches if m.is_file() and is_media(m))
+            base = Path(re.split(r"[*?\[]", str(p), maxsplit=1)[0] or ".")
+            found.update(m.resolve() for m in matches
+                         if m.is_file() and is_media(m) and not is_llmve_output(m, base))
     if not found:
         raise FileNotFoundError(f"No video files found for input: {spec}")
     return sorted(found)
@@ -91,7 +134,8 @@ class Workspace:
     """Directory holding every checkpoint for one batch of source clips."""
 
     def __init__(self, root: Path, sources: list[Path]):
-        self.root = root
+        # absolute, so ffmpeg and tools run from any working directory find it
+        self.root = Path(root).expanduser().resolve()
         self.sources = sources
         self.root.mkdir(parents=True, exist_ok=True)
         self._manifest = self._load_manifest()

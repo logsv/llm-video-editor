@@ -1,6 +1,6 @@
 ---
 name: motion-graphics
-description: Add HyperFrames motion graphics to a cut - lower thirds, chapter title cards, keyword callouts, or a custom animated HTML/GSAP composition - rendered to transparent video and composited at render time. Use when the user asks for titles, name tags, text pop-ups, animated inserts or chapter cards, after planning and before cut-audit.
+description: Add HyperFrames motion graphics to a cut - lower thirds, chapter title cards, keyword callouts, place titles (where we are), labels pointing at things in the shot (animal, temple, road), or a custom animated HTML/GSAP composition - rendered to transparent video and composited at render time. Use when the user asks for titles, name tags, text pop-ups, animated inserts or chapter cards, after planning and before cut-audit.
 ---
 
 # motion-graphics
@@ -29,9 +29,44 @@ uv run llmve graphics chapters <ws>        # one title card per clip with a chap
   (in 9:16 it sits above the caption band automatically).
 - `title-card`: full-frame dimmed card with `title`, optional `kicker`, `dim`.
 - `callout`: one short phrase that pops in, `position` top | center.
+- `location`: place title with a map pin, `title` (place) + `subtitle` (region,
+  road, distance), `position` top-left | bottom-left | top-right | center.
+- `label`: points at something in the shot, `text`, optional `detail`, `x`/`y` (0-1
+  of the frame). It does not track movement: use it on a steady shot, 2-3 s.
 - All take `accent` (hex colour). Keep text short: 2-6 words per line.
 Clip ids come from `edl_raw.json`. Time a graphic to the words: offset = word
 start in `transcript.json` minus the clip's `start`.
+
+## 1b. Travel and vlog footage: say where we are and what we see
+Viewers of a trip video want to know where they are. Decide with the user's brief
+(nothing here is mandatory):
+- **Places**: `places` (agent tool) gives the route from the cameras' GPS and clock.
+  With the user's permission (`location_lookup`) it names each stop (town, nearest
+  temple/fort, road, state) and, with `nearby_km`, named temples, forts, forests,
+  national parks, rivers and highways (e.g. "NH39"). Without GPS or permission, ask
+  the user or read signs in frames and the transcript. Never guess a place name.
+- **Titles**: a `location` title when a new stop starts (2.5-4 s, on a steady shot),
+  `title-card` for each leg or day (chapters), `callout` for a fact ("380 km",
+  "Day 2", "11th century"), `label` for something worth pointing at.
+- **Objects**: `objects` lists animals, vehicles and people in a clip (local detector)
+  with their frame position for a `label`. Temples, forests, rivers and roads are not
+  detector classes: look at `frames` (stills privacy) and name them from `places`.
+- Keep it sparse: one text element on screen at a time, none over faces or captions,
+  and about one place title per new location, not per clip. `review` reports the
+  longest stretch without titles and chapters that have none.
+
+## 1c. Readable, safe and matched to the shot
+`review` measures every graphic on its shot (`review.json` -> `graphic_checks`; the
+agent's `review` tool returns them): contrast (3:1 minimum), busy background, size,
+title-safe area (5% in 16:9; in 9:16 also the right 15% and bottom 20%), face and
+caption overlap, the shot's palette and suggested colours. Act on each issue:
+- low contrast or busy background: a template with a card (`lower-third`), the
+  suggested `text`/`contrast` colour, another `position`, or a calmer moment (offset);
+- colours: `"accent": "auto"` takes a colour from the shot (or a contrasting one when
+  the match would be faint); or use `suggested.match` for a calm look,
+  `suggested.contrast` to stand out. Keep one accent per video unless the brief asks;
+- size: keep titles short so the template can stay large; never shrink text to fit;
+- overlap: move it (`position`, `box`) or time it to a shot without a face.
 
 ## 2. Custom compositions
 For anything the templates don't cover (an app UI recreation, a stat counter, a

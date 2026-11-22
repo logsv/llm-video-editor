@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from ..ffmpeg.graph import PIP_MARGIN, PIP_SIZE, fit_filter
-from ..ffmpeg.runner import ffmpeg
+from ..ffmpeg.runner import FFmpegError, ffmpeg
 from ..ffmpeg.sheets import SheetSpec
 from ..schemas import EDL, ClipsManifest, CutAudit, Review, ReviewTile, Transcript
 from ..schemas.geometry import BBox
@@ -122,6 +122,7 @@ def build_review(ws: Workspace, edl: EDL | None = None, *, cols: int = 6, rows: 
 
     tiles: list[ReviewTile] = []
     warnings: list[str] = []
+    checks: list = []
     placements = {p.clip_id: p for p in (gmap.placements if gmap else [])}
     if gmap is None:
         warnings.append("no geometry_map for this cut: crops are centred, captions at default")
@@ -156,6 +157,18 @@ def build_review(ws: Workspace, edl: EDL | None = None, *, cols: int = 6, rows: 
             label = f"{ov.overlay_id} over {clip.clip_id} {t_out:.1f}s"
         _tile(work / f"tile_{n:03d}.png", edl, src, src_t, t_out, clip.crop_center, box, label,
               work, has_ass, overlay, tile, clip.zoom, graphic)
+        if graphic:
+            try:
+                from .text_safety import frame_rgb, graphic_rgba, measure
+
+                chk = measure(edl, frame_rgb(edl, src, src_t, clip.crop_center, clip.zoom),
+                              graphic_rgba(edl, graphic[0], graphic[1], graphic[2]),
+                              graphic_id=ovp[2].graphic_id, t_out=t_out, subject_box=box,
+                              caption_position=clip.caption_position or "bottom")
+                checks.append(chk)
+                warnings += [f"{chk.graphic_id}: {i}" for i in chk.issues]
+            except (ValueError, FFmpegError) as e:
+                warnings.append(f"{ovp[2].graphic_id}: could not check text: {e}")
         tiles.append(ReviewTile(index=n, clip_id=clip.clip_id,
                                 overlay_id=ovp[1].overlay_id if ovp and overlay else None,
                                 graphic_id=ovp[2].graphic_id if graphic else None,
@@ -175,7 +188,8 @@ def build_review(ws: Workspace, edl: EDL | None = None, *, cols: int = 6, rows: 
         warnings.append("cut_audit.json did not pass")
 
     review = Review(edl_hash=edl_hash(audited), geometry_hash=geometry_hash(edl),
-                    sheets=[ws.rel(s) for s in sheets], tiles=tiles, warnings=warnings)
+                    sheets=[ws.rel(s) for s in sheets], tiles=tiles, warnings=warnings,
+                    graphic_checks=checks)
     Workspace.write(work / "review.json", review)
     return review
 
