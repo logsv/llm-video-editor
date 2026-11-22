@@ -1,9 +1,9 @@
 # Agent mode: plan
 
-Status: P0 (foundation) implemented and merged; fixes from the first real run (background
-jobs for long tools, batch params shape, media results from every search, the `python -m`
-launcher, renders kept out of footage folders, absolute workspace paths) on
-`claude/agent-mode-fixes`; P1-P5 to do.
+Status: P0 (foundation) is done and merged. On `claude/agent-mode-fixes`: fixes from the
+first real run, place/route and object tools, place and label graphics, text safety
+checks, and long (2-50 min) cuts from mostly silent footage. Everything else is listed in
+[section 11, Remaining work](#11-remaining-work), the to-do list for this plan.
 
 ## Goal
 
@@ -147,14 +147,14 @@ parameters or handbook advice.
 
 ## 7. Phases
 
-| Phase | Delivers | Done when |
-|---|---|---|
-| P0 Foundation | Stages split into small tools with parameters instead of rules; audit reports only; versioned edits, undo, decision log; `llmve mcp` tool server; `llmve setup` (machine record, user profile); privacy setting | Claude Code reproduces today's edit quality by calling tools only and choosing every parameter |
-| P1 Perception | Speech map, re-transcribe, frame/sheet viewer, scene measurements, audio analysis and beats | The agent can describe every clip of the trip footage and justify its selects |
-| P2 Craft | Colour, transitions (incl. J/L-cuts), speed, stabilise, audio cleanup and mix; workshop with registered outputs | Each tool's render matches the request (frame and audio checks) |
-| P3 Editor agent | `llmve agent <clips> -p "<brief>"`; handbook, style profile, gotchas memory; plan -> edit -> self-review loop; specialist sub-agents with briefs | One command produces a finished edit with a readable decision log and no rules in the decision path |
-| P4 Visual story | Story building from scenes as well as speech (travel, B-roll-heavy footage) | The Bhopal -> Khajuraho footage becomes a coherent 10-minute video |
-| P5 Evaluation | Test shoots (talking head, travel, multi-cam, screen recording), quality and cost metrics, recorded runs replayed as regression tests | The agent beats the rule-based pipeline on the metrics, with measured cost per video |
+| Phase | Delivers | Done when | Status |
+|---|---|---|---|
+| P0 Foundation | Stages split into small tools with parameters instead of rules; audit reports only; versioned edits, undo, decision log; `llmve mcp` tool server; `llmve setup` (machine record, user profile); privacy setting | Claude Code reproduces today's edit quality by calling tools only and choosing every parameter | Done (headless permissions for `claude -p` still open) |
+| P1 Perception | Speech map, re-transcribe, frame/sheet viewer, scene measurements, audio analysis and beats | The agent can describe every clip of the trip footage and justify its selects | Partly: frames, speech map, GPS route and place names, local object detection |
+| P2 Craft | Colour, transitions (incl. J/L-cuts), speed, stabilise, audio cleanup and mix; workshop with registered outputs | Each tool's render matches the request (frame and audio checks) | Partly: graphics safety checks, place/label templates; transitions, colour, speed, audio cleanup and voice-over to do |
+| P3 Editor agent | `llmve agent <clips> -p "<brief>"`; handbook, style profile, gotchas memory; plan -> edit -> self-review loop; specialist sub-agents with briefs | One command produces a finished edit with a readable decision log and no rules in the decision path | To do |
+| P4 Visual story | Story building from scenes as well as speech (travel, B-roll-heavy footage) | The Bhopal -> Khajuraho footage becomes a coherent 10-minute video | Partly: `plan` fills long cuts with silent footage (rule-based); agent-side scene story to do |
+| P5 Evaluation | Test shoots (talking head, travel, multi-cam, screen recording), quality and cost metrics, recorded runs replayed as regression tests | The agent beats the rule-based pipeline on the metrics, with measured cost per video | To do |
 
 ## 8. First test: Bhopal -> Khajuraho
 
@@ -217,6 +217,116 @@ Every requirement given during planning, and where the plan covers it.
 | Delivery | AI narration or generated B-roll | Disclosure flag in the publish package | P3 |
 | Cost | Visibility of model spend | Per-run token and cost report next to the decision log | P3 |
 
+## 11. Remaining work
+
+The to-do list, in suggested order. Each item keeps the agent-mode rule: tools execute,
+check and report, and the agent decides.
+
+### Done so far (for reference)
+- **P0:**
+  - versioned edits with undo and the decision log;
+  - atomic edit tools plus `batch`;
+  - report-only audit;
+  - review, render and publish tools;
+  - MCP server plus `llmve tool`;
+  - profile, machine record and privacy setting;
+  - `first` N clips;
+  - footage inspection (HDR, VFR, rotation, audio, split recordings, GPS).
+- **Fixes from the first Mac run:**
+  - background jobs plus `job_status` for analyze, review and render;
+  - `batch` takes the same params as the standalone tools;
+  - media results kept from every search;
+  - `python -m llm_video_editor` launcher;
+  - renders refused inside footage folders, and earlier renders skipped by scans;
+  - absolute workspace paths.
+- **On-screen text:**
+  - `places` (route, stops, distances; place names and nearby temples, forts, forests, parks, rivers and highways, with the user's `location_lookup` permission);
+  - `objects` (local YOLO);
+  - `location` and `label` templates;
+  - `graphics_templates`;
+  - review reports on-screen text coverage.
+- **Text safety:**
+  - per graphic, review measures contrast, busy background, size, title-safe area (16:9 and 9:16), and face/caption overlap;
+  - it also gives the shot's palette and suggested colours;
+  - `accent: "auto"` picks the colour from the shot.
+- **Length:**
+  - `plan` fills targets that speech can't reach with shots from clips without speech, in recording order;
+  - YouTube 2-50 min cuts work when the footage covers them.
+
+### 11.1 Next: problems seen in the Bhopal -> Khajuraho run
+| Item | Why | Notes |
+|---|---|---|
+| Transitions | Only hard cuts exist; the trip edit asks for crossfades between places | Per-cut `transition` on the EDL: cut, crossfade, dip to black/white, whip/slide (duration set by the agent); J-cut and L-cut (audio leads or trails the picture). Render with `xfade`/`acrossfade`; review tiles show mid-transition frames; audit reports transitions longer than either clip |
+| Flip / rotate clips | Helmet camera mounted upside down, no rotation tag | `set_clip` fields `rotate` (90/180/270) and `flip` (h/v), applied in the fit filter, review and geometry |
+| Whisper hallucinations on wind and engine noise | Invented speech in silent riding clips | Voice-activity speech map (Silero VAD or similar); `transcript` and `speech_map` mark words outside voice activity as doubtful; `analyze` option to drop them |
+| Copyrighted audio in the footage | Sound & Light show narration, temple loudspeakers, radio | Music/speech classification of clip audio; flagged in audit and publish; the agent mutes, ducks or replaces |
+| Shot inventory and balance report | The 7-minute brief asks for balanced road / animal / river / people / temple shares | `inventory` tool: categories per clip from objects, places, speech and the agent's own labels (stored); `balance` report on the current edit (seconds and share per category, longest run of one category). The agent sets the target shares |
+| Place titles in `auto` mode | `auto` adds no place titles by itself | With `location_lookup` on, one `location` title per new stop (`--place-titles`), passed through the text safety check |
+
+### 11.2 AI voice-over (P2)
+- **Already there:**
+  - `MusicTrack(role="voiceover")`;
+  - music ducks under the voice-over as well as the clips' own voice.
+- **To build:**
+  - `voices` tool: engines and voices available, language, licence, whether each runs locally or in the cloud.
+  - `voiceover` tool: lines in (text, voice, speed, style), audio out; reports each line's exact length; cached by text and voice; short audition sample.
+  - `pronounce` tool: a list of place names (Khajuraho, Orchha, Chhatarpur) and how to say them.
+  - Placement: lines anchored to clips, in gaps found by the speech map.
+  - Audit reports:
+    - a line longer than its gap;
+    - a line over the clips' speech;
+    - a line running past its shot;
+    - a line whose anchor clip was removed.
+  - Mix: the clip's own sound dips slightly under the voice-over (new), and lines are levelled to the measured speech loudness.
+  - Captions: voice-over lines go into the burned-in captions and the `.srt` file.
+  - Publish: AI-voice disclosure in `upload.md`, with a reminder of YouTube's altered/synthetic content checkbox when the voice is realistic (always when it is a copy of the user's voice).
+- **Engines:**
+  - local Kokoro by default (licence allows commercial use, Hindi voices);
+  - Piper as a light alternative;
+  - macOS `say` as a fallback;
+  - cloud (ElevenLabs, OpenAI, Azure, Google) only when the user sets `tts=cloud`, which sends the script text only.
+  - Voice-copy models with non-commercial licences (XTTS, F5-TTS) are not used for monetised channels.
+  - Check every licence again at implementation.
+- **Consent:**
+  - copying a voice only from the user's own recorded sample, with explicit consent, never anyone else's;
+  - `tts` is the user's setting, never the agent's.
+- **Phases:**
+  - V1: local engine plus tools, audit checks, mix, captions, disclosure;
+  - V2: cloud engines and a copy of the user's own voice;
+  - V3: `auto --voiceover auto` and narration advice in the skills.
+- **Waiting on the user:**
+  - language (English, Hindi, Hinglish);
+  - voice (generic narrator or a copy of their own voice);
+  - engine (local first, or a cloud engine from the start);
+  - amount (a few lines between scenes, or narration over most of the riding).
+
+### 11.3 P1 Perception (rest)
+- Re-transcribe a range with a bigger model and a name list; Hindi/Hinglish models; Devanagari fonts for captions, graphics and thumbnails.
+- Scene measurements: exposure, white balance, saturation, noise, shake, motion.
+- Audio: loudness, peaks, noise floor, beat times (cutting to music).
+- Clock-offset correction between cameras; near-duplicate detection; proxies and sampled analysis for many hours of footage; disk-space checks.
+
+### 11.4 P2 Craft (rest)
+- Colour: per-clip correction from measurements, matching across cameras, looks (curves, LUT), HDR/log to SDR tone mapping.
+- Speed (slow motion from 60/120 fps, ramps) and stabilisation.
+- Audio cleanup: wind and engine noise reduction, EQ, levels.
+- Blur tool for strangers' faces and number plates.
+- Workshop: scratch folder for agent-written Python, outputs registered as assets, scripts and package versions logged; project virtual environment only.
+- Self-review from the render: cut strips, continuity frames, loudness/peak report, 720p review copy, version compare.
+
+### 11.5 P3 Editor agent
+- `llmve agent <clips> -p "<brief>"`: one command running `claude -p` with the MCP server, the handbook and an explicit allowed-tool list (headless permissions).
+- Handbook and skills rewritten for agent mode (story, pacing, balance, text, music, transitions), style profile and gotchas memory fed from accepted notes.
+- Plan -> edit -> self-review loop; `--resume` from the last version; iteration and token budgets; cost report per run.
+- Several deliverables per project (the long video plus Shorts), sharing analysis.
+- Disclosure flag for AI narration or generated B-roll.
+
+### 11.6 P4 Visual story and P5 Evaluation
+- P4: the agent builds the story from scenes as well as speech (route order, balance targets, establishing -> detail -> reaction patterns), replacing the rule-based fill for agent runs.
+- P5: test shoots (talking head, travel, multi-camera, screen recording), quality and cost metrics, recorded runs replayed as regression tests; decide whether `llmve auto` stays as a fallback.
+
 ## Open
 
 - Whether `llmve auto` is removed once agent mode beats it (default: keep as fallback).
+- Voice-over decisions listed in 11.2.
+- Order of 11.1 items (suggested: transitions, flip/rotate, VAD, inventory/balance, copyrighted audio, place titles in auto).
