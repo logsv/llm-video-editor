@@ -192,13 +192,18 @@ def level_to_speech(segs: list[Segment], edl: EDL, work: Path, tracks: list[Musi
         lufs = file_loudness(t.path, cache)  # None: too short or silent -> plain gain
         gain = t.gain_db + (ref - lufs if lufs is not None else 0.0)
         levelled.append(dataclasses.replace(t, gain_db=round(max(-60.0, min(40.0, gain)), 2)))
-    if not any(t.duck for t in levelled):
-        return levelled, Ducking(m.duck_depth_db, m.attack_ms, m.release_ms), mezz
+    vo_offsets = [t.gain_db for t in tracks if t.role == "voiceover"]
+    vo_key = (max(-30.0, min(50.0, KEY_LEVEL_DB - (ref + max(vo_offsets))))
+              if vo_offsets else 0.0)
+    clip_depth = m.clip_duck_db if vo_offsets and has_voice else 0.0
     # the speech bus: the clips' voice at ``ref`` plus voice-overs at ref + their volume_db
-    offsets = ([0.0] if has_voice else []) + [t.gain_db for t in tracks if t.role == "voiceover"]
+    offsets = ([0.0] if has_voice else []) + vo_offsets
     key = max(-30.0, min(50.0, KEY_LEVEL_DB - (ref + max(offsets)))) if offsets else -60.0
+    if not any(t.duck for t in levelled):
+        key = 0.0
     return levelled, Ducking(m.duck_depth_db, m.attack_ms, m.release_ms,
-                             key_gain_db=round(key, 2)), mezz
+                             key_gain_db=round(key, 2), clip_depth_db=clip_depth,
+                             vo_key_gain_db=round(vo_key, 2)), mezz
 
 
 def _render_mezzanine(i: int, segs: list[Segment], edl: EDL, out_dir: Path) -> Path:

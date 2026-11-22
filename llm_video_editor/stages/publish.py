@@ -145,7 +145,8 @@ def used_credits(ws: Workspace, edl: EDL) -> tuple[list[Credit], list[str]]:
     """Credits for every third-party file the cut uses (music, sfx, voice-over, B-roll)."""
     registry = {c.file: c for c in load_credits(ws).items}
     own = {str(p.resolve()) for p in ws.sources}
-    files = [m.file for m in edl.music] + [o.source_file for o in edl.overlays]
+    files = [m.file for m in edl.music if not m.generator]  # generated narration: disclosed
+    files += [o.source_file for o in edl.overlays]
     files += [c.source_file for c in edl.clips if c.role == "broll"]
     credits, missing = [], []
     for f in dict.fromkeys(str(Path(x).expanduser().resolve()) for x in files):
@@ -169,13 +170,21 @@ def credit_line(c: Credit) -> str:
     return line + (f" {c.landing_url}" if c.landing_url and c.landing_url not in line else "")
 
 
+def ai_voices(edl: EDL) -> list[str]:
+    """Engines and voices of generated narration in the cut, e.g. ["kokoro:af_heart"]."""
+    return sorted({m.generator for m in edl.music if m.role == "voiceover" and m.generator})
+
+
 def build_description(copy: _Copy, chapters: list[tuple[float, str]], credits: list[Credit],
-                      hashtags: list[str]) -> str:
+                      hashtags: list[str], ai_voice: list[str] | None = None) -> str:
     parts = [clean(copy.hook), clean(copy.body)]
     if chapters:
         parts.append("Chapters\n" + description_block(chapters).strip())
-    if credits:
-        lines = [f"- {credit_line(c)}" for c in credits]
+    lines = [f"- {credit_line(c)}" for c in credits]
+    if ai_voice:
+        engines = sorted({v.split(":")[0].capitalize() for v in ai_voice})
+        lines.append(f"- Narration: AI-generated voice ({', '.join(engines)})")
+    if lines:
         parts.append("Music and footage\n" + "\n".join(lines))
     if hashtags:
         parts.append(" ".join(hashtags))
@@ -235,7 +244,12 @@ def publish(ws: Workspace, provider: Provider | None, *, video: Path | None = No
     hashtags = fix_hashtags(copy.hashtags)
     credits, missing = used_credits(ws, edl)
     warnings += missing
-    description = build_description(copy, chapters, credits, hashtags)
+    voices = ai_voices(edl)
+    description = build_description(copy, chapters, credits, hashtags, voices)
+    if voices:
+        warnings.append(f"AI narration ({', '.join(voices)}): the description says so. In "
+                        "YouTube Studio, tick 'altered or synthetic content' if the voice "
+                        "could be mistaken for a real person")
     category = copy.category if copy.category in CATEGORIES else ""
     if not category:
         warnings.append(f"category {copy.category!r} is not a YouTube category; pick one in Studio")

@@ -27,7 +27,8 @@ INSTRUCTIONS = (
     "the viewer is (places gives the route and, if the user allowed it, place names), "
     "chapter cards and callouts are graphics (graphics_templates lists them; a "
     "`location` template exists for place titles), and review reports what text the "
-    "video has. analyze, review and render can take "
+    "video has. Narration is optional: voiceover adds short lines you wrote, only where "
+    "they add information, story or humour. analyze, review and render can take "
     "minutes: when they return a job_id, call job_status until it is done."
 )
 

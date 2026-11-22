@@ -71,6 +71,8 @@ class Ducking:
     attack_ms: float = 20.0
     release_ms: float = 450.0
     key_gain_db: float = 0.0
+    clip_depth_db: float = 0.0  # the clips' own audio dips this far under voice-overs
+    vo_key_gain_db: float = 0.0  # brings the voice-over bus to KEY_LEVEL_DB
 
 
 KEY_LEVEL_DB = -20.0  # speech level the sidechain key is normalised to
@@ -230,17 +232,28 @@ def _track_chain(g: Graph, t: MusicSpec, total: float) -> str:
                     f"apad=whole_dur={total:.6f}")
 
 
-def add_speech(g: Graph, voice: str, tracks: list[MusicSpec], *, total: float) -> str:
-    """The speech bus: the clips' own audio plus every voice-over track."""
+def add_speech(g: Graph, voice: str, tracks: list[MusicSpec], *, total: float,
+               ducking: Ducking | None = None) -> str:
+    """The speech bus: the clips' own audio plus every voice-over track. With
+    ``ducking.clip_depth_db`` the clips' own sound dips under the voice-overs."""
     vos = [t for t in tracks if t.role == "voiceover"]
     if not vos:
         return voice
-    labels = [voice]
     for i, t in enumerate(vos):
         g.filters.append(_track_chain(g, t, total) + f"[vo{i}]")
-        labels.append(f"vo{i}")
-    g.filters.append("".join(f"[{x}]" for x in labels)
-                     + f"amix=inputs={len(labels)}:duration=first:normalize=0[speech]")
+    if len(vos) > 1:
+        g.filters.append("".join(f"[vo{i}]" for i in range(len(vos)))
+                         + f"amix=inputs={len(vos)}:duration=first:normalize=0[vobus]")
+    else:
+        g.filters.append("[vo0]anull[vobus]")
+    if ducking is not None and ducking.clip_depth_db > 0:
+        g.filters.append("[vobus]asplit=2[vomix][vokeyraw]")
+        g.filters.append(f"[vokeyraw]volume={ducking.vo_key_gain_db:.2f}dB[vokey]")
+        clip_duck = Ducking(ducking.clip_depth_db, ducking.attack_ms, ducking.release_ms)
+        g.filters.append(f"[{voice}][vokey]{duck_filter(clip_duck)}[scene]")
+        g.filters.append("[scene][vomix]amix=inputs=2:duration=first:normalize=0[speech]")
+    else:
+        g.filters.append(f"[{voice}][vobus]amix=inputs=2:duration=first:normalize=0[speech]")
     return "speech"
 
 
@@ -252,7 +265,7 @@ def add_music(g: Graph, voice: str, tracks: list[MusicSpec], *, total: float,
     loudness measurement of the speech), so the dip depends on whether someone is
     talking, not on how loud the recording happens to be.
     """
-    speech = add_speech(g, voice, tracks, total=total)
+    speech = add_speech(g, voice, tracks, total=total, ducking=ducking)
     beds = [t for t in tracks if t.role != "voiceover"]
     if not beds:
         return speech

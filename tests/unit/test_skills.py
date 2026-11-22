@@ -10,7 +10,7 @@ from llm_video_editor.cli.app import app
 SKILLS = Path(__file__).resolve().parents[2] / ".claude" / "skills"
 EXPECTED = {"edit-video", "watch", "cut-audit", "take-geometry", "b-roll-select", "review-gate",
             "youtube-edit", "youtube-shorts", "motion-graphics", "royalty-free-media",
-            "youtube-publish", "refine-edit"}
+            "youtube-publish", "refine-edit", "voiceover"}
 
 
 def _commands() -> set[str]:

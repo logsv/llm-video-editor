@@ -739,9 +739,11 @@ def audit_tool(ctx: Context, p: WsP) -> dict:
     _, rep = _agent_audit(ws, write=False)
     EditStore(ws).note("check", "audit", {}, "", f"{len(rep.violations)} findings, "
                        f"{'ok' if rep.passed else 'blocking errors'}")
+    vo = _vo_report(EditStore(ws).current(), ws)
     return {"passed": rep.passed, "duration_after_pacing": rep.duration_after,
             "pauses_removed": rep.pauses_removed,
-            "findings": [v.model_dump(exclude_none=True) for v in rep.violations]}
+            "findings": [v.model_dump(exclude_none=True) for v in rep.violations],
+            "voiceover": [r for r in vo if r["issues"]] or "no voice-over issues"}
 
 
 class ReviewP(WsP):
@@ -942,6 +944,162 @@ def job_status(ctx: Context, p: JobStatusP) -> dict:
     if job["status"] == "done" and ctx.privacy == "stills":
         ctx.images_out = job.get("images", [])
     return jobs.summary(job)
+
+
+# =============================================================================== voice-over
+class VoicesP(P):
+    engine: str = Field("auto", description="kokoro | say | auto")
+    language: str | None = Field(None, description="filter, e.g. Hindi, en-gb")
+
+
+@tool("voices", "look", VoicesP)
+def voices_tool(ctx: Context, p: VoicesP) -> dict:
+    """Voices for narration on this machine (local engines only; nothing is uploaded):
+    engine, voice id, language, gender, licence."""
+    from ..voice import EngineUnavailable, list_voices
+
+    try:
+        vs = list_voices(p.engine, p.language)
+    except EngineUnavailable as e:
+        raise ValueError(str(e)) from e
+    return {"voices": [vars(v) for v in vs][:200],
+            "note": "kokoro voice ids: a=US English, b=UK English, h=Hindi; f/m = female/male "
+                    "(af_heart, am_michael, bf_emma, bm_george, hf_alpha, hm_omega, ...)"}
+
+
+class VoLine(P):
+    text: str = Field(min_length=1, max_length=400,
+                      description="the line as it should be heard and captioned")
+    anchor_clip_id: str = Field(description="edit clip the line starts on")
+    offset: float = Field(0.0, ge=0, description="seconds after that clip starts")
+    voice: str | None = None
+    speed: float | None = Field(None, ge=0.5, le=1.6)
+    volume_db: float | None = Field(None, ge=-30, le=12,
+                                    description="relative to the speech; default 0")
+
+
+class VoiceoverP(EditP):
+    lines: list[VoLine] = Field(min_length=1, max_length=60)
+    engine: str = Field("auto", description="kokoro | say | auto")
+    voice: str = Field("af_heart", description="default voice for lines without one")
+    speed: float = Field(1.0, ge=0.5, le=1.6)
+    lang: str | None = Field(None, description="override the voice's language, e.g. hi")
+    audition: bool = Field(False, description="only synthesize and report lengths; the "
+                           "edit is not changed")
+
+
+def _vo_report(edl: EDL, ws: Workspace) -> list[dict]:
+    """Where each voice-over sits and what it collides with (a report)."""
+    from ..ffmpeg.probe import media_duration
+    from ..stages.captions import output_words
+
+    starts = edl.output_starts()
+    index = {c.clip_id: i for i, c in enumerate(edl.clips)}
+    total = edl.total_duration
+    durations = [c.duration for c in edl.clips]
+    speech = output_words(edl.model_copy(update={"music": []}),
+                          Workspace.read(ws.transcript, Transcript), starts, durations) \
+        if ws.transcript.exists() else []
+    spans = []
+    for m in edl.music:
+        if m.role != "voiceover" or m.anchor_clip_id not in index:
+            continue
+        a = starts[index[m.anchor_clip_id]] + m.offset
+        try:
+            length = m.duration or media_duration(Path(m.file).expanduser()) - m.src_start
+        except Exception:  # noqa: BLE001
+            length = 0.0
+        spans.append((m, a, a + length))
+    out = []
+    for m, a, b in spans:
+        talk = sum(max(0.0, min(b, we) - max(a, ws_)) for ws_, we, _, _ in speech)
+        others = [o.track_id for o, oa, ob in spans if o is not m and oa < b and ob > a]
+        issues = []
+        if talk > 0.15:
+            issues.append(f"over {talk:.1f}s of speech in the clips")
+        if others:
+            issues.append(f"overlaps voice-over {', '.join(others)}")
+        if b > total + 0.05:
+            issues.append(f"runs {b - total:.1f}s past the end of the video")
+        if not Path(m.file).expanduser().exists():
+            issues.append("audio file missing")
+        out.append({"track_id": m.track_id, "text": m.text, "from": round(a, 2),
+                    "to": round(b, 2), "issues": issues})
+    return out
+
+
+@tool("voiceover", "edit", VoiceoverP)
+def voiceover_tool(ctx: Context, p: VoiceoverP) -> dict:
+    """Narration lines you wrote, spoken by a local voice and added as voice-over tracks
+    (one version). Each line is clean 48 kHz audio, levelled to the speech at render;
+    music ducks under it and the clips' own sound dips (mix.clip_duck_db). Captions use
+    the text. Returns each line's exact length and what it collides with."""
+    from ..voice import EngineUnavailable, get_engine, synthesize
+
+    ws = _ws(p.workspace)
+    try:
+        eng = get_engine(p.engine)
+    except EngineUnavailable as e:
+        raise ValueError(str(e)) from e
+    made = []
+    for ln in p.lines:
+        voice = ln.voice or p.voice
+        if eng.name == "say" and voice == "af_heart":
+            voice = "Samantha"
+        made.append((ln, synthesize(ws.root, eng, ln.text, voice, speed=ln.speed or p.speed,
+                                    lang=p.lang)))
+    lines = [{"text": line.text, "spoken": line.spoken, "seconds": line.duration,
+              "voice": line.voice, "file": line.file} for _, line in made]
+    if p.audition:
+        return {"lines": lines, "note": "audition only: the edit is unchanged"}
+
+    def add_all(edl: EDL) -> EDL:
+        manifest = _manifest(ws)
+        for ln, line in made:
+            fields = {"file": line.file, "role": "voiceover", "anchor_clip_id": ln.anchor_clip_id,
+                      "offset": ln.offset, "text": line.text,
+                      "generator": f"{line.engine}:{line.voice}"}
+            if ln.volume_db is not None:
+                fields["volume_db"] = ln.volume_db
+            edl = ops.add_item(edl, manifest, kind="music", **fields)
+        return edl
+
+    store = EditStore(ws)
+    ch = store.apply("voiceover", {"lines": [ln.model_dump() for ln in p.lines],
+                                   "engine": eng.name, "voice": p.voice}, p.reason, add_all,
+                     expected_version=p.expected_version)
+    report = _vo_report(store.current(), ws)
+    new_ids = {r["track_id"] for r in report[-len(made):]}
+    return {"version": ch.version, "summary": ch.summary, "lines": lines,
+            "fit": [r for r in report if r["track_id"] in new_ids]}
+
+
+class PronounceP(P):
+    reason: str = Field(min_length=3)
+    say_as: dict[str, str] = Field(description="word -> respelling, e.g. "
+                                   "{\"Khajuraho\": \"Kha-joo-raa-ho\"}")
+    scope: Literal["project", "all"] = Field("project", description="this workspace, or "
+                                             "every project (your config folder)")
+    workspace: str | None = None
+
+
+@tool("pronounce", "edit", PronounceP)
+def pronounce_tool(ctx: Context, p: PronounceP) -> dict:
+    """How the narrator says names (places, people): respellings applied before speech;
+    captions keep the real spelling. Re-run voiceover for lines that use them."""
+    from ..voice.synth import voice_dir
+    from .setup import config_dir
+
+    if p.scope == "project":
+        if not p.workspace:
+            raise ValueError("scope project needs the workspace")
+        path = voice_dir(_ws(p.workspace).root) / "lexicon.json"
+    else:
+        path = config_dir() / "lexicon.json"
+    lex = json.loads(path.read_text()) if path.exists() else {}
+    lex.update(p.say_as)
+    path.write_text(json.dumps(lex, indent=1, ensure_ascii=False))
+    return {"lexicon": lex, "file": str(path)}
 
 
 # =============================================================================== profile

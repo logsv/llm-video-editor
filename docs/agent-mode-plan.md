@@ -269,7 +269,19 @@ check and report, and the agent decides.
 | Shot inventory and balance report | The 7-minute brief asks for balanced road / animal / river / people / temple shares | `inventory` tool: categories per clip from objects, places, speech and the agent's own labels (stored); `balance` report on the current edit (seconds and share per category, longest run of one category). The agent sets the target shares |
 | Place titles in `auto` mode | `auto` adds no place titles by itself | With `location_lookup` on, one `location` title per new stop (`--place-titles`), passed through the text safety check |
 
-### 11.2 AI voice-over (P2)
+### 11.2 AI voice-over (P2): V1 done
+V1 is implemented:
+- the `voices`, `voiceover` (with audition) and `pronounce` tools;
+- local Kokoro plus macOS `say`;
+- spoken numbers and units, and lexicons;
+- cached clean synthesis;
+- levelling to the speech, music ducking, and the scene dipping under narration (`mix.clip_duck_db`);
+- captions from the line text;
+- audit fit report;
+- publish disclosure;
+- `voiceover` skill: narrate only where it helps.
+
+Remaining: V2 (cloud engines behind a user `tts` setting, a copy of the user's own voice with consent) and V3 (`auto --voiceover`). The original plan follows for reference.
 - **Already there:**
   - `MusicTrack(role="voiceover")`;
   - music ducks under the voice-over as well as the clips' own voice.

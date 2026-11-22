@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ..schemas import EDL
-from ..workspace import Workspace
+from ..workspace import Workspace, atomic_write_text
 
 
 class EditConflict(RuntimeError):
@@ -79,9 +79,7 @@ class EditStore:
     def _write_version(self, edl: EDL) -> int:
         n = self.head() + 1
         Workspace.write(self.path(n), edl)
-        tmp = self.head_path.with_suffix(".tmp")
-        tmp.write_text(str(n))
-        tmp.replace(self.head_path)
+        atomic_write_text(self.head_path, str(n))
         Workspace.write(self.ws.edl_raw, edl)  # existing stages read this
         return n
 

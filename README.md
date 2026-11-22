@@ -392,6 +392,15 @@ uv run llmve tool open_project '{"inputs": ["~/Videos/trip"], "first": 15}'
   detector (`uv sync --extra pro`; nothing is uploaded) and says where they are in the
   frame for a `label` graphic. `review` reports how much of the video has titles, the
   longest stretch without any, and chapters without a title card.
+- AI voice-over (`uv sync --extra voice`): `voiceover` speaks short lines the agent
+  wrote with a local Kokoro voice (English US/UK, Hindi and more; nothing is uploaded;
+  the model downloads once to `~/.cache/llmve/models`), or macOS `say` as a fallback.
+  Lines are cleaned (silence trimmed, no clicks), levelled to your speech, the music
+  ducks under them and the scene's own sound dips by `mix.clip_duck_db` (6 dB). Numbers
+  and units are spoken out; `pronounce` fixes names. Captions use the line text and
+  publish discloses the AI narration. The agent narrates only where a line adds
+  information, story or humour (`voiceover` skill); `audit` reports lines over your
+  speech, overlapping lines and lines past the end.
 - Every graphic is measured on the shot under it at review: contrast of the text against
   what is behind it (3:1 minimum for titles), a busy background, a tiny size, the
   title-safe area (bigger in 9:16, where Shorts buttons and titles sit), and overlap with
@@ -498,6 +507,7 @@ Everything for one batch of inputs lives in `.llmve/<batch_hash>/` (set
 | `render/qc_report.json` | render | QC: duration, A/V offset, loudness, chapter warnings |
 | `manifest.json` | every stage | per stage: cache key, outputs, completion time |
 | `places.json`, `places_nearby.json` | agent `places` with lookup | cached place names and nearby named features per stop |
+| `voice/vo-*.wav`, `voice/lexicon.json` | agent `voiceover`, `pronounce` | narration lines (cached by text and voice), this project's pronunciations |
 | `jobs/<job_id>.json`, `.log` | agent tools over MCP | background jobs (analyze, review, render): status, result, log |
 | `<video>.llmve.json` (next to the render) | render | marks the file as an llmve render (folder scans skip it) |
 

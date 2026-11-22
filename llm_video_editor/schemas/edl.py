@@ -83,6 +83,8 @@ class MusicTrack(Strict):
     loop: bool = False  # repeat a short bed to fill `duration`
     fade_in: float = Field(1.0, ge=0)
     fade_out: float = Field(2.0, ge=0)
+    text: str | None = None  # voice-over: the line as written (captions, review, publish)
+    generator: str | None = None  # voice-over made by TTS, e.g. "kokoro:am_michael"
 
     @model_validator(mode="after")
     def _voiceover_defaults(self):
@@ -109,6 +111,9 @@ class MixSettings(Strict):
     # speech loudness before its volume_db (consistent whatever the file's mastering);
     # "file": volume_db is a plain gain on the file as it is
     music_level: Literal["speech", "file"] = "speech"
+    # the clips' own sound (wind, engine, crowd) dips this far while a voice-over speaks,
+    # so narration reads clearly without muting the scene; 0 = no dip
+    clip_duck_db: float = Field(6.0, ge=0, le=30)
     attack_ms: float = Field(20.0, gt=0, le=2000)  # how fast it dips
     release_ms: float = Field(450.0, gt=0, le=5000)  # how fast it comes back
 
